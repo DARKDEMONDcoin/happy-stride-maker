@@ -157,7 +157,7 @@ const FORM_ACTION_RE =
  */
 /** طلبات تحتاج تنقلاً حقيقياً بين مواقع: حجز، شراء، مقارنة عروض وأسعار حيّة. */
 const BROWSE_TASK_RE =
-  /(احجز|احجزلي|حجز\s+(?:فندق|طيران|تذكر|رحلة|موعد)|تذكرة|تذاكر|اشتري|اشتريلي|أشتري|اطلب\s+لي|قارن\s+(?:أسعار|الأسعار|عروض|العروض)|أرخص|ارخص|\bbook\b|\bbuy\b|cheapest|compare prices)/i;
+  /(احجز|احجزلي|حجز\s+(?:فندق|طيران|تذكر|رحلة|موعد)|تذكرة|تذاكر|اشتري|اشتريلي|أشتري|اطلب\s+لي|قارن(?:ي|وا)?(?:\s+(?:لي|لنا|بين))*\s+(?:أسعار|الأسعار|اسعار|عروض|العروض|أفضل|افضل)|مقارنة\s+(?:أسعار|اسعار|عروض)|أفضل\s+(?:سعر|الأسعار)|أرخص|ارخص|\bbook\b|\bbuy\b|cheapest|compare prices)/i;
 
 function browserActionValues(message: string, urls: string[]): Record<string, string> | null {
   if (!urls.length || !FORM_ACTION_RE.test(message)) return null;
