@@ -20,3 +20,4 @@
 - Workspace navigation groups shared work and specialist tools in `AppShell`'s opening menu, while employee-specific tool shortcuts remain in chat; this keeps small-screen navigation reachable without implying every tool is automatic in chat.
 - Work requests outside the chat employee's specialty are auto-delegated in `runEmployeeTurn` (smartHandoff → agentId drives persona, tools, actions; messages stay in the original conversation); avoids forcing users to switch chats.
 - Employee specialties and in-chat tools live in `src/lib/employee-toolbelt.ts`; booking/buying/price-compare requests get a `team-browser-task` approval card that runs the multi-step browser on "اعتمد ونفّذ" and stops before payment.
+- In-chat owner commands on ready outputs (ابعت/عدّل…ثم ابعت/إلغاء) are parsed in `src/lib/chat-commands.ts` and applied to ActionCard/InlineApproval via signals; action edits go through `reviseEmployeeAction`. Keeps one command grammar for the chat.
