@@ -103,7 +103,19 @@ export async function writePending(admin: Admin, link: LinkRow, patch: Partial<P
 
 /** يعرض شاشة: يحرّر رسالة الأزرار إن وُجدت، وإلا يرسل رسالة جديدة. */
 export async function show(ctx: UiCtx, html: string, kb: Kb = []) {
-  const text = html.length > 4000 ? `${html.slice(0, 3990)}…` : html;
+  let text = html;
+  if (html.length > 4000) {
+    // المحتوى الطويل: نرسل الأجزاء الأولى كرسائل مستقلة، والجزء الأخير يحمل الأزرار.
+    const { splitForTelegram } = await import("./telegram-format");
+    const parts = splitForTelegram(html, 3800);
+    text = parts.pop() ?? "";
+    for (const part of parts) {
+      await tg(ctx.botToken, "sendMessage", {
+        chat_id: ctx.chatId, text: part, parse_mode: "HTML", link_preview_options: { is_disabled: true },
+      }).catch(() => tg(ctx.botToken, "sendMessage", { chat_id: ctx.chatId, text: part.replace(/<[^>]+>/g, "") }));
+    }
+    ctx = { ...ctx, messageId: undefined };
+  }
   const markup = { inline_keyboard: kb };
   if (ctx.messageId) {
     try {
