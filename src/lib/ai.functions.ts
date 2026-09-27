@@ -1459,7 +1459,12 @@ export async function runEmployeeTurn(
     if (deliverables.length === 1) {
       // حارس أخير بعد المراجعة الآلية: حتى لو أعادت المراجعة مقدمة أو تذييل قياس،
       // يبقى الرد القابل للنشر هو متن المخرج المنظم وحده.
-      const postBody = extractPostText(deliverables[0]?.body ?? reply);
+      const fullBody = (deliverables[0]?.body ?? reply).trim();
+      const extracted = extractPostText(fullBody);
+      // المستخلِص مصمَّم لنصوص المنشورات؛ على البريفات والتقارير المنظمة كان يقتطع
+      // الفقرة الأولى فقط ويُسقط المتن كله — فنُبقي المتن الكامل حين يكون القصّ جائراً.
+      const postBody =
+        extracted && (agentId === "sonny" || extracted.length >= fullBody.length * 0.6) ? extracted : fullBody;
       if (postBody) {
         deliverables[0]!.body = postBody;
         reply = postBody;
