@@ -125,3 +125,63 @@ export const compareSitesTask = createServerFn({ method: "POST" })
     const { compareSites } = await import("./browser-agent.server");
     return compareSites({ goal: data.goal, urls: data.urls });
   });
+
+/** تعديل قيم إجراء جاهز بأمر نصي من المالك داخل الشات («خلّي الرد أقصر»، «غيّر الموعد لبكرة»…). */
+export const reviseEmployeeAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        workspaceId: z.string().uuid(),
+        employeeId: z.string().min(2).max(20),
+        label: z.string().max(200),
+        inputs: z
+          .array(z.object({ name: z.string().max(60), label: z.string().max(120) }))
+          .max(30),
+        values: z.record(z.string(), z.string().max(20_000)),
+        instruction: z.string().min(1).max(4000),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    await assertOwner(context.supabase, data.workspaceId);
+    const { freeChat } = await import("./nour-research.server");
+    const fields = data.inputs.map((i) => `- ${i.name} (${i.label})`).join("\n");
+    const raw = await freeChat(
+      data.employeeId,
+      [
+        {
+          role: "system",
+          content: [
+            `أنت تعدّل مسودة إجراء «${data.label}» حسب تعليمات صاحب العمل حرفياً.`,
+            "عدّل فقط ما طُلب، واحتفظ بباقي القيم كما هي، وحافظ على اللغة واللهجة الأصلية ما لم يُطلب غير ذلك.",
+            "أعد JSON فقط بالشكل: {\"values\": {...كل الحقول...}, \"summary\": \"جملة قصيرة بالعربية تصف ما عدّلته\"}",
+            `الحقول المتاحة:\n${fields}`,
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: `القيم الحالية:\n${JSON.stringify(data.values, null, 2)}\n\nالتعليمات: ${data.instruction}`,
+        },
+      ],
+      { maxTokens: 2000, timeoutMs: 45_000 },
+    );
+    const match = raw.match(/\{[\s\S]*\}/);
+    let parsed: { values?: Record<string, unknown>; summary?: unknown } = {};
+    try {
+      parsed = match ? JSON.parse(match[0]) : {};
+    } catch {
+      parsed = {};
+    }
+    if (!parsed.values || typeof parsed.values !== "object")
+      throw new Error("لم أستطع تطبيق التعديل، جرّب صياغة أوضح.");
+    const allowed = new Set(data.inputs.map((i) => i.name));
+    const next: Record<string, string> = { ...data.values };
+    for (const [k, v] of Object.entries(parsed.values)) {
+      if (allowed.has(k) && typeof v === "string") next[k] = v;
+    }
+    return {
+      values: next,
+      summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 300) : "طبّقت التعديل.",
+    };
+  });
