@@ -47,7 +47,7 @@ export function taskIdFromMarkup(markup?: { inline_keyboard?: { callback_data?: 
   for (const row of markup?.inline_keyboard ?? []) {
     for (const btn of row) {
       const m = /^(tv|tw|twg|twn|ae|aa|ar|ary):([0-9a-f-]{36})/i.exec(btn.callback_data ?? "");
-      if (m) return m[2];
+      if (m?.[2]) return m[2];
     }
   }
   return null;
