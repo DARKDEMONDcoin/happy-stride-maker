@@ -5,11 +5,22 @@ import { GUEST_EMAIL } from "@/lib/guest.functions";
 import { BrandLoader } from "@/components/site/BrandLoader";
 import { LiveWorkspaceSync } from "@/lib/live-sync";
 
+/** تحقّق الخادم مرة واحدة فقط؛ التنقّل الداخلي يقرأ الجلسة المحلية فورًا (تجربة واتساب). */
+let verifiedUserId: string | null = null;
+
 export const Route = createFileRoute("/app")({
   ssr: false,
   beforeLoad: async () => {
+    const { data: local } = await supabase.auth.getSession();
+    const sessionUser = local.session?.user;
+    if (sessionUser && verifiedUserId === sessionUser.id && sessionUser.email !== GUEST_EMAIL)
+      return { user: sessionUser };
     const { data } = await supabase.auth.getUser();
-    if (data.user && data.user.email !== GUEST_EMAIL) return { user: data.user };
+    if (data.user && data.user.email !== GUEST_EMAIL) {
+      verifiedUserId = data.user.id;
+      return { user: data.user };
+    }
+    verifiedUserId = null;
     if (data.user) await supabase.auth.signOut();
     throw redirect({ to: "/auth", search: { mode: "signin" } });
   },
