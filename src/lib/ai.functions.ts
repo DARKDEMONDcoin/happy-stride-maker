@@ -26,6 +26,7 @@ import { answerPolicyBlock } from "./answer-policy";
 import { reasoningDepthBlock, effortFor } from "./reasoning-depth";
 import { replyStructureBlock } from "@/lib/reply-structure";
 import { buildBrandContext } from "@/lib/brand-context.server";
+import { planTurn, turnPlanBlock } from "@/lib/turn-plan";
 
 type Deliverable = {
   title?: string;
@@ -475,9 +476,10 @@ export async function runEmployeeTurn(
       ) || data.message.length > 220;
 
     // نيّة الرسالة: عمل (مخرج جاهز) أم سؤال/دردشة يُجاب عليها فقط بلا فرض خدمات.
-    const { chatIntent, intentBlock, wantsImageRequest, refusesImageRequest } =
+    const { intentBlock, wantsImageRequest, refusesImageRequest } =
       await import("./chat-intent");
-    const intent = chatIntent(data.message);
+    const turnPlan = planTurn(data.message, longForm);
+    const intent = turnPlan.intent;
     // توجيه ذكي تلقائي: طلب عمل خارج اختصاص موظف المحادثة يتولاه الزميل المختص
     // خلف الكواليس (تعليماته وأدواته وإجراءاته)، وتعود النتيجة في نفس المحادثة.
     const routed =
@@ -505,8 +507,7 @@ export async function runEmployeeTurn(
 
     // بوابة نية البحث: تلتقط «ابحث/قارن/معايير السوق/منافس/ترند» لكل الموظفين،
     // لا الكلمات الزمنية وحدها — فلا يجيب موظف عن واقع السوق من معرفة مخزّنة.
-    const { researchIntent } = await import("./research-intent");
-    const wantsResearch = researchIntent(data.message);
+    const wantsResearch = turnPlan.research;
 
     // «هات صورة من النت»: نجلب صوراً حقيقية بالتوازي مع البحث بدل توليد صورة.
     const webImageMod = await import("./web-images.server");
@@ -550,9 +551,8 @@ export async function runEmployeeTurn(
             // بحث عميق: جولات متتابعة تقرأ داخل الصفحات وتستخرج الأرقام بمصادرها.
             // يُشغَّل حين يطلبه المستخدم صراحةً أو حين يكون المطلوب تقريراً/دراسة.
             if (
-              DEEP_RESEARCH_RE.test(data.message) ||
-              (wantsResearch.reason === "market" && longForm) ||
-              /(قارن|مقارنة|compare).{0,80}(بالتفصيل|بالأرقام|مع أرقام|أسعار|منافس)/iu.test(data.message)
+              turnPlan.research.depth === "deep" ||
+              DEEP_RESEARCH_RE.test(data.message)
             ) {
               const m = await import("./deep-research.server");
               return m.deepResearch(agentId, wantsResearch.topic, {
@@ -791,6 +791,7 @@ export async function runEmployeeTurn(
       ...governanceBlocks(agentId),
       nowBlock(timezone, ws.country),
       intentBlock(intent),
+      turnPlanBlock(turnPlan),
       answerPolicyBlock(agentId, intent),
       reasoningDepthBlock(agentId as EmployeeId, intent),
       coworkerVoiceBlock({
@@ -1004,7 +1005,7 @@ export async function runEmployeeTurn(
     // طلبات المقالات/الخطط الكاملة تحتاج مخرجاً طويلاً ومهلة أطول — مع سقف زمني إجمالي حتى لا يعلّق الشات.
     // عمق الاستدلال يتغيّر حسب ثقل الطلب: دردشة سريعة بلا تفكير طويل، ومخرج
     // استراتيجي بتفكير أعمق — ذكاء أعلى حيث يستحق، وسرعة حيث لا يضيف التفكير شيئاً.
-    const effort = effortFor(intent, data.message, longForm);
+    const effort = turnPlan.reasoningEffort;
     const chatOptions = longForm
       ? {
           json: true,
@@ -1419,6 +1420,23 @@ export async function runEmployeeTurn(
               output: reply,
               criteria: qualityCriteria[agentId] ?? [],
               bannedWords: workspace.banned_words ?? [],
+              maxRepairRounds: turnPlan.complexity === "deep" ? 2 : 1,
+              researchGap: wantsResearch.wanted
+                ? async (issues) => {
+                    const { employeeResearch } = await import("./employee-research.server");
+                    const gap = await employeeResearch(
+                      agentId,
+                      `${wantsResearch.topic} ${issues.join(" ").slice(0, 300)}`,
+                      {
+                        industry: workspace.industry,
+                        city: (ws as { city?: string | null }).city ?? undefined,
+                        country: ws.country ?? undefined,
+                        budgetMs: 7_000,
+                      },
+                    );
+                    return gap.block;
+                  }
+                : undefined,
             }),
           )
           .catch((error: unknown) => {

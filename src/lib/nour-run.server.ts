@@ -28,6 +28,7 @@ import { replyStructureBlock } from "./reply-structure";
 import { coworkerVoiceBlock } from "./coworker-voice";
 import { effortFor } from "./reasoning-depth";
 import { ambientPulse, nowBlock, timezoneForCountry } from "./live-context.server";
+import { planTurn, turnPlanBlock } from "./turn-plan";
 
 export type Client = SupabaseClient<Database>;
 
@@ -827,6 +828,7 @@ export async function executeSkill(
     .filter(([, v]) => v?.trim())
     .map(([k, v]) => `${k}: ${v.length > 120 ? `${v.slice(0, 120)}…` : v}`)
     .join(" · ");
+  const turnPlan = planTurn(`${skill.title} ${requestSummary}`, LONG_SKILLS.has(skill.id));
 
   const brandContext = buildBrandContext(
     workspace,
@@ -991,6 +993,7 @@ export async function executeSkill(
     // نفس طبقات الحوكمة المستخدمة في المحادثة، بنية «عمل» ثابتة — حتى يكون مخرج
     // القدرات والجدولة التلقائية مطابقاً لمخرج المحادثة بلا نصف تعليمات.
     answerPolicyBlock(params.employeeId, "work"),
+    turnPlanBlock(turnPlan),
     reasoningDepthBlock(params.employeeId as EmployeeId, "work"),
     // بوابات الإذن (مال، التزام قانوني، إجراء لا رجعة فيه، إرسال خارجي) ونبرة
     // الزميل والإفصاح بأنك ذكاء اصطناعي: كانت في المحادثة فقط، وهي لازمة هنا أيضاً
@@ -1061,7 +1064,7 @@ export async function executeSkill(
   const long = LONG_SKILLS.has(skill.id);
   // عمق التفكير يتحدد بثقل المهمة نفسها — كما في المحادثة — بدل «منخفض» الافتراضي
   // الذي كان يسري على كل المهام المجدولة مهما كانت استراتيجية.
-  const effort = effortFor("work", `${skill.title} ${requestSummary}`, long);
+  const effort = turnPlan.reasoningEffort;
   const chat = (messages: { role: string; content: string }[]) =>
     freeChat(apiKey, messages as Parameters<typeof freeChat>[1], {
       timeoutMs: long ? 150_000 : 55_000,
@@ -1125,6 +1128,18 @@ export async function executeSkill(
       output,
       criteria: qualityCriteria[params.employeeId] ?? [],
       bannedWords: workspace.banned_words ?? [],
+      maxRepairRounds: turnPlan.complexity === "deep" ? 2 : 1,
+      researchGap: async (issues) => {
+        const gap = await researchFor(
+          params.employeeId,
+          apiKey,
+          { name: workspace.name, industry: workspace.industry },
+          `${skill.title} ${requestSummary} ${issues.join(" ").slice(0, 300)}`,
+          params.workspaceId,
+          8_000,
+        );
+        return gap.block;
+      },
     });
     // Number.isFinite لا ||: الدرجة صفر حكمٌ حقيقي برسوب، وتحويلها إلى null
     // كان يُخفي أسوأ المخرجات من متوسط الجودة ومن دورة التعلّم.
