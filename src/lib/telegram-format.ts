@@ -143,7 +143,16 @@ export function splitForTelegram(text: string, max = 3800): string[] {
     for (const line of para.split("\n")) {
       if ((buf + "\n" + line).length > max) push();
       if (line.length > max) {
-        for (let i = 0; i < line.length; i += max) parts.push(line.slice(i, i + max));
+        for (let i = 0; i < line.length; ) {
+          let end = Math.min(i + max, line.length);
+          // لا نقطع داخل وسم HTML أو كيان (&amp;) — نرجع لبدايته.
+          const lt = line.lastIndexOf("<", end - 1);
+          if (end < line.length && lt > i && line.indexOf(">", lt) >= end) end = lt;
+          const amp = line.lastIndexOf("&", end - 1);
+          if (end < line.length && amp > i && end - amp < 10 && !line.slice(amp, end).includes(";")) end = amp;
+          parts.push(line.slice(i, end));
+          i = end;
+        }
       } else buf = buf ? `${buf}\n${line}` : line;
     }
   }
