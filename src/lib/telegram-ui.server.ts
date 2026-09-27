@@ -35,7 +35,13 @@ export type UiCtx = {
 };
 
 export type PendingState = {
-  wait?: { kind: "edit_task" | "brain_note" | "reject_reason" | "skill_field" | "extra_field" | "kw_add"; id?: string } | null;
+  wait?: {
+    kind: "edit_task" | "brain_note" | "reject_reason" | "skill_field" | "extra_field" | "kw_add" | "cred_field" | "rewrite_note";
+    id?: string;
+    /** حقل بيانات الربط الجاري إدخاله + ما تم إدخاله حتى الآن (للربط داخل تيليجرام). */
+    field?: string;
+    data?: Record<string, string>;
+  } | null;
   /** نموذج قدرة قيد التعبئة — نفس قدرات الموقع حرفياً. */
   skill?: { emp: string; id: string; i: number; values: Record<string, string> } | null;
   action?: {
@@ -156,7 +162,7 @@ export async function viewMenu(ctx: UiCtx) {
       [{ text: "🛫 الطيار الآلي", callback_data: "zo" }, { text: "📈 ترتيب جوجل", callback_data: "zr" }],
       [{ text: "📊 الزيارات", callback_data: "zv" }, { text: "⏰ الأتمتة", callback_data: "au" }],
       [{ text: "👤 حسابي", callback_data: "za" }, { text: "⚙️ الإعدادات", callback_data: "s" }],
-      [{ text: "🌐 افتح سهل", url: `${publicOrigin()}/app` }],
+      [{ text: "🔑 رابط دخول للموقع (اختياري)", callback_data: "zal" }],
     ],
   );
 }
@@ -388,7 +394,10 @@ async function openConversation(ctx: UiCtx, convId: string) {
       "✅ المحادثة دي بقت الحالية — اكتب رسالتك وهتكمل فيها (وهتظهر في الموقع كمان).",
     ].join("\n"),
     [
-      [{ text: "🌐 افتحها في الموقع", url: `${publicOrigin()}/app/chat/${conv.employee_id}` }],
+      [
+        { text: "✨ محادثة جديدة", callback_data: `hn:${conv.employee_id}` },
+        { text: `🧰 قدرات ${empName(conv.employee_id)}`, callback_data: `k:${conv.employee_id}:0` },
+      ],
       back("h:0"),
     ],
   );
@@ -457,7 +466,12 @@ export async function viewTask(ctx: UiCtx, id: string, note?: string) {
       { text: "✖️ رفض", callback_data: `ar:${t.id}` },
     ]);
   }
-  kb.push([{ text: "🌐 افتحها في الموقع", url: `${publicOrigin()}/app/tasks` }]);
+  if (t.output) {
+    kb.push([
+      { text: "🔄 إعادة صياغة", callback_data: `tw:${t.id}` },
+      { text: "✏️ تعديل بالكتابة", callback_data: `ae:${t.id}` },
+    ]);
+  }
   kb.push(back(t.status === "review" ? "ap" : "t:all"));
   const publishable = new Set(["instagram", "facebook", "linkedin", "x", "twitter", "telegram", "pinterest", "youtube"]);
   if (t.output && publishable.has(String(t.channel ?? "").toLowerCase())) {
@@ -668,7 +682,6 @@ export async function viewIntegrations(ctx: UiCtx, emp?: string) {
 }
 
 async function connectIntegration(ctx: UiCtx, provider: string) {
-  const siteUrl = `${publicOrigin()}/app/integrations`;
   const { pipedreamApp } = await import("@/data/pipedream-apps");
   const app = pipedreamApp(provider);
   if (app) {
@@ -707,14 +720,8 @@ async function connectIntegration(ctx: UiCtx, provider: string) {
       console.error("[telegram-ui] connect link failed:", e);
     }
   }
-  await show(
-    ctx,
-    [
-      `<b>🔗 ربط ${esc(providerLabel(provider))}</b>`,
-      "المنصة دي محتاجة بيانات ربط (رابط موقع/مفتاح) — افتح صفحة التكاملات في سهل وكمّل الربط هناك، وهيظهر هنا فوراً.",
-    ].join("\n"),
-    [[{ text: "🌐 افتح صفحة التكاملات", url: siteUrl }], [{ text: "🔄 تحديث الحالة", callback_data: "is" }], back("i")],
-  );
+  const { startManualConnect } = await import("./telegram-connect.server");
+  return startManualConnect(ctx, provider);
 }
 
 async function disconnectIntegration(ctx: UiCtx, provider: string) {
@@ -926,7 +933,7 @@ export async function viewSettings(ctx: UiCtx) {
   const prefs = uid ? await loadPrefs(ctx.admin, uid) : null;
   const val = (k: string) => (prefs ? Boolean((prefs as Record<string, unknown>)[k]) : true);
   const kb: Kb = PREFS.map(([k, l]) => [{ text: `${val(k) ? "🔔" : "🔕"} ${l}`, callback_data: `st:${k}` }]);
-  kb.push([{ text: "🌐 إعدادات الحساب في الموقع", url: `${publicOrigin()}/app/settings` }]);
+  kb.push([{ text: "🕒 غيّر المنطقة الزمنية", callback_data: "stz" }, { text: "👤 حسابي", callback_data: "za" }]);
   kb.push(back());
   await show(
     ctx,
@@ -950,6 +957,95 @@ async function togglePref(ctx: UiCtx, key: string) {
   await ctx.admin
     .from("notification_preferences")
     .upsert({ user_id: uid, [key]: !current } as Database["public"]["Tables"]["notification_preferences"]["Insert"], { onConflict: "user_id" });
+}
+
+const ZONES = ["Africa/Cairo", "Asia/Riyadh", "Asia/Dubai", "Europe/Istanbul", "UTC"];
+
+/** يبدّل المنطقة الزمنية بين الشائعة — نفس إعداد الموقع. */
+async function cycleTimezone(ctx: UiCtx) {
+  const uid = await ownerId(ctx);
+  if (!uid) return;
+  const prefs = await loadPrefs(ctx.admin, uid);
+  const now = String((prefs as Record<string, unknown> | null)?.["timezone"] ?? "Africa/Cairo");
+  const next = ZONES[(ZONES.indexOf(now) + 1) % ZONES.length]!;
+  await ctx.admin
+    .from("notification_preferences")
+    .upsert({ user_id: uid, timezone: next } as Database["public"]["Tables"]["notification_preferences"]["Insert"], { onConflict: "user_id" });
+  return next;
+}
+
+// ── إعادة صياغة المخرج داخل تيليجرام ──
+const ANGLES: [string, string][] = [
+  ["short", "✂️ أقصر وأوضح"],
+  ["sell", "🔥 نبرة بيع أقوى"],
+  ["simple", "🙂 أبسط وأقرب للناس"],
+  ["formal", "👔 رسمي واحترافي"],
+  ["detail", "➕ أطول وبتفاصيل أكثر"],
+];
+
+const ANGLE_INSTRUCTION: Record<string, string> = {
+  short: "اختصر المخرج للنصف مع الحفاظ على كل المعلومات المهمة.",
+  sell: "أعد صياغته بنبرة تسويقية مقنعة تحث على التصرف فوراً.",
+  simple: "أعد صياغته بلغة بسيطة جداً يفهمها أي شخص عادي.",
+  formal: "أعد صياغته بأسلوب رسمي احترافي يناسب العملاء والشركات.",
+  detail: "وسّعه بتفاصيل عملية وأمثلة وخطوات تنفيذ واضحة.",
+};
+
+export async function viewRewrite(ctx: UiCtx, id: string) {
+  await show(ctx, "🔄 <b>عايز الصياغة الجديدة تكون إزاي؟</b>", [
+    ...ANGLES.map(([k, l]) => [{ text: l, callback_data: `twg:${id}:${k}` }]),
+    [{ text: "✍️ اكتب طلب التعديل بنفسك", callback_data: `twn:${id}` }],
+    back(`tv:${id}`),
+  ]);
+}
+
+/** يعيد صياغة مخرج المهمة فعلياً بنفس عقل الموظف ويحفظ الناتج. */
+export async function rewriteTask(ctx: UiCtx, id: string, instruction: string) {
+  const { data: t } = await ctx.admin
+    .from("tasks")
+    .select("id, employee_id, title, output")
+    .eq("id", id)
+    .eq("workspace_id", ctx.link.workspace_id)
+    .maybeSingle();
+  if (!t?.output) return void (await show(ctx, "مفيش مخرج نعيد صياغته.", [back("t:all")]));
+  await show(ctx, "⏳ بعيد الصياغة دلوقتي…", []);
+  try {
+    const { freeChat } = await import("./nour-research.server");
+    const out = await freeChat(
+      t.employee_id,
+      [
+        {
+          role: "system",
+          content: `أنت ${empName(t.employee_id)} في فريق سهل. تعيد صياغة مخرج جاهز بالعربية. أعد النص النهائي فقط بدون مقدمات أو شرح.`,
+        },
+        { role: "user", content: `المخرج الحالي:\n${t.output}\n\nالمطلوب: ${instruction}` },
+      ],
+      { maxTokens: 2000, timeoutMs: 90_000 },
+    );
+    const next = out.trim();
+    if (!next) throw new Error("جاء رد فاضي");
+    await ctx.admin.from("tasks").update({ output: next }).eq("id", id).eq("workspace_id", ctx.link.workspace_id);
+    try {
+      const { recordTaskFeedback } = await import("./learning.server");
+      await recordTaskFeedback(ctx.admin, {
+        workspaceId: ctx.link.workspace_id,
+        taskId: id,
+        employeeId: t.employee_id,
+        kind: "edited",
+        reason: `طلب المالك إعادة صياغة: ${instruction}`,
+        originalText: t.output,
+        editedText: next,
+      });
+    } catch {
+      /* التعلم اختياري */
+    }
+    await viewTask(ctx, id, "🔄 <b>دي الصياغة الجديدة.</b> تقدر تعتمدها أو تعيدها تاني.");
+  } catch (e) {
+    await show(ctx, `⚠️ ${esc(e instanceof Error ? e.message : "تعذّرت إعادة الصياغة")}`, [
+      [{ text: "🔁 جرب تاني", callback_data: `tw:${id}` }],
+      back(`tv:${id}`),
+    ]);
+  }
 }
 
 // ─────────────────────────── موجّه الأزرار ───────────────────────────
@@ -1021,6 +1117,14 @@ export async function handleCallback(ctx: UiCtx, data: string): Promise<string |
     case "ae":
       await writePending(ctx.admin, ctx.link, { wait: { kind: "edit_task", id: a } });
       await show(ctx, "✏️ ابعت النص المعدّل كامل في رسالة، وهحفظه مكان المخرج الحالي (وهيظهر في الموقع).", [back(`tv:${a}`)]);
+      return;
+    case "tw":
+      return void (await viewRewrite(ctx, a));
+    case "twg":
+      return void (await rewriteTask(ctx, a, ANGLE_INSTRUCTION[b] ?? "أعد صياغته بشكل أفضل."));
+    case "twn":
+      await writePending(ctx.admin, ctx.link, { wait: { kind: "rewrite_note", id: a } });
+      await show(ctx, "✍️ اكتب التعديل اللي عايزه بالظبط (مثال: «خليه أقصر وزوّد سعر العرض»).", [back(`tv:${a}`)]);
       return;
     case "xv":
       return void (await viewPendingAction(ctx));
@@ -1126,10 +1230,15 @@ export async function handleCallback(ctx: UiCtx, data: string): Promise<string |
       await togglePref(ctx, a);
       await viewSettings(ctx);
       return "اتحفظ";
+    case "stz": {
+      const zone = await cycleTimezone(ctx);
+      await viewSettings(ctx);
+      return zone ? `المنطقة: ${zone}` : undefined;
+    }
     default: {
       if (op && op.startsWith("z")) {
         const { handleExtraCallback } = await import("./telegram-ui-extra.server");
-        const r = await handleExtraCallback(ctx, op, a);
+        const r = await handleExtraCallback(ctx, op, a, b);
         if (r !== null) return r;
       }
       await viewMenu(ctx);
@@ -1149,6 +1258,17 @@ export async function handlePendingText(ctx: UiCtx, text: string): Promise<boole
   }
   await writePending(ctx.admin, ctx.link, { wait: null });
   const ws = ctx.link.workspace_id;
+  if (wait.kind === "cred_field") {
+    ctx.messageId = undefined;
+    const { handleCredText } = await import("./telegram-connect.server");
+    await handleCredText(ctx, String(wait.id), String(wait.field), wait.data ?? {}, text);
+    return true;
+  }
+  if (wait.kind === "rewrite_note" && wait.id) {
+    ctx.messageId = undefined;
+    await rewriteTask(ctx, wait.id, text.trim());
+    return true;
+  }
   if (wait.kind === "extra_field" || wait.kind === "kw_add") {
     ctx.messageId = undefined;
     const { saveExtraText } = await import("./telegram-ui-extra.server");

@@ -208,7 +208,7 @@ async function explainHave(ctx: Ctx) {
       "أو أرسل هنا كود الربط المكوّن من ٦ رموز إن كان معك.",
     ].join("\n"),
     [
-      [{ text: "🌐 فتح إعدادات تيليجرام في سهل", url: `${publicOrigin()}/app/settings` }],
+      [{ text: "🆕 مش عندي حساب — سجّلني هنا", callback_data: "ob:new" }],
       [{ text: "↩️ رجوع", callback_data: "ob:back" }],
     ],
   );

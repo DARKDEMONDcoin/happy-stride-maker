@@ -29,6 +29,15 @@ const POST_STATUS: Record<string, string> = {
   publishing: "⏳ جارٍ النشر",
 };
 
+/** مواعيد سريعة للجدولة بضغطة واحدة (بالدقائق). */
+const SLOT_CHOICES: [number, string][] = [
+  [60, "⏱️ بعد ساعة"],
+  [180, "⏱️ بعد ٣ ساعات"],
+  [480, "🌙 الليلة (بعد ٨ ساعات)"],
+  [1440, "📅 بكرة نفس الوقت"],
+  [4320, "📅 بعد ٣ أيام"],
+];
+
 // ── الإحاطة اليومية (أمَل) ──
 export async function viewBriefing(ctx: UiCtx, refresh = false) {
   if (refresh) await show(ctx, "⏳ بجهّز إحاطة النهارده…", []);
@@ -73,7 +82,7 @@ export async function viewCalendar(ctx: UiCtx) {
   const kb: Button[][] = (data ?? []).map((p) => [
     { text: `${POST_STATUS[p.status]?.slice(0, 2) ?? "•"} ${providerLabel(p.provider)} · ${cut(p.body, 28)}`, callback_data: `zcv:${p.id}` },
   ]);
-  kb.push([{ text: "🌐 التقويم الكامل في الموقع", url: `${publicOrigin()}/app/calendar` }]);
+  kb.push([{ text: "🔄 حدّث التقويم", callback_data: "zc" }, { text: "🛫 الطيار الآلي", callback_data: "zo" }]);
   kb.push(back());
   const lines = (data ?? []).map((p) => `${POST_STATUS[p.status] ?? p.status} · <b>${esc(providerLabel(p.provider))}</b> · ${esc(fmt(p.scheduled_at))}\n   ${esc(cut(p.body, 80))}`);
   await show(ctx, ["<b>🗓️ تقويم النشر</b>", lines.length ? lines.join("\n") : "مفيش منشورات مجدولة.", "", "اضغط أي منشور لعرضه أو نشره فوراً أو إلغائه."].join("\n"), kb);
@@ -89,7 +98,10 @@ async function viewPost(ctx: UiCtx, id: string, note?: string) {
   if (!p) return void (await show(ctx, "المنشور مش موجود.", [back("zc")]));
   const canAct = p.status === "scheduled" || p.status === "failed" || p.status === "review";
   const kb: Button[][] = [];
-  if (canAct) kb.push([{ text: "🚀 انشر الآن", callback_data: `zcp:${p.id}` }, { text: "✖️ إلغاء", callback_data: `zcx:${p.id}` }]);
+  if (canAct) {
+    kb.push([{ text: "🚀 انشر الآن", callback_data: `zcp:${p.id}` }, { text: "✖️ إلغاء", callback_data: `zcx:${p.id}` }]);
+    kb.push([{ text: "⏰ غيّر الموعد", callback_data: `zct:${p.id}` }]);
+  }
   kb.push(back("zc"));
   await show(
     ctx,
@@ -184,7 +196,7 @@ export async function viewRankings(ctx: UiCtx) {
   await show(ctx, ["<b>📈 ترتيب الكلمات في جوجل</b>", lines.length ? lines.join("\n") : "مفيش كلمات متتبعة — اضغط «أضف كلمات».", ""].join("\n"), [
     ...(kws ?? []).slice(0, 8).map((k) => [{ text: `🗑️ ${cut(k.keyword, 30)}`, callback_data: `zkd:${k.id}` }]),
     [{ text: "🔄 حدّث الترتيب", callback_data: "zrr" }, { text: "➕ أضف كلمات", callback_data: "zrk" }],
-    [{ text: "🌐 صفحة الترتيب", url: `${publicOrigin()}/app/rankings` }],
+    [{ text: "📊 الزيارات", callback_data: "zv" }, { text: "☀️ إحاطة اليوم", callback_data: "zb" }],
     back(),
   ]);
 }
@@ -217,12 +229,12 @@ export async function viewAnalytics(ctx: UiCtx) {
       "<b>المصادر:</b>",
       ...top("source").map(([k, v]) => `• ${esc(k)} — ${v}`),
     ].join("\n"),
-    [[{ text: "🌐 التقارير الكاملة", url: `${publicOrigin()}/app` }], back()],
+    [[{ text: "🔄 حدّث", callback_data: "zv" }, { text: "📈 ترتيب جوجل", callback_data: "zr" }], back()],
   );
 }
 
 /** موجّه أزرار الشاشات الإضافية (البادئة z). يعيد null لو الزر مش تبعها. */
-export async function handleExtraCallback(ctx: UiCtx, op: string, a: string): Promise<string | undefined | null> {
+export async function handleExtraCallback(ctx: UiCtx, op: string, a: string, b = ""): Promise<string | undefined | null> {
   const ws = ctx.link.workspace_id;
   switch (op) {
     case "zb":
@@ -239,6 +251,27 @@ export async function handleExtraCallback(ctx: UiCtx, op: string, a: string): Pr
       await ctx.admin.from("social_posts").update({ status: "cancelled", locked_at: null }).eq("id", a).eq("workspace_id", ws).in("status", ["scheduled", "failed", "review"]);
       await viewCalendar(ctx);
       return "اتلغى";
+    case "zct":
+      return void (await show(ctx, "⏰ <b>اختار الموعد الجديد للمنشور:</b>", [
+        ...SLOT_CHOICES.map(([mins, label]) => [{ text: label, callback_data: `zcs:${a}:${mins}` }]),
+        [{ text: "⬅️ رجوع", callback_data: `zcv:${a}` }, { text: "🏠 القائمة", callback_data: "m" }],
+      ]));
+    case "zcs": {
+      const mins = Number(b);
+      if (!Number.isFinite(mins) || mins <= 0) return null;
+      const at = new Date(Date.now() + mins * 60_000).toISOString();
+      const { data: row } = await ctx.admin
+        .from("social_posts")
+        .update({ status: "scheduled", scheduled_at: at, locked_at: null })
+        .eq("id", a)
+        .eq("workspace_id", ws)
+        .in("status", ["scheduled", "failed", "review"])
+        .select("id")
+        .maybeSingle();
+      if (!row) return "مش متاح للجدولة";
+      await viewPost(ctx, a, `⏰ <b>اتجدول ${esc(fmt(at))}.</b>`);
+      return "اتجدول";
+    }
     case "zo":
       return void (await viewAutopilot(ctx));
     case "zot": {
