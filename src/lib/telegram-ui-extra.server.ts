@@ -292,6 +292,123 @@ async function viewTeamProject(ctx: UiCtx, id: string) {
   );
 }
 
+// ── الكشف الشامل: نفس فحص الموقع (ملف النشاط + سيو) ويُحفظ في المعرفة ──
+async function runDiscovery(ctx: UiCtx) {
+  const { data: ws } = await (ctx.admin as any).from("workspaces").select("website").eq("id", ctx.link.workspace_id).maybeSingle();
+  const site = String(ws?.website ?? "").trim();
+  if (!site) {
+    return void (await show(ctx, "🔎 <b>الكشف الشامل</b>\nأضف رابط موقعك أولاً وهحلّله لك بالكامل.", [[{ text: "👤 أضف الموقع من «حسابي»", callback_data: "za" }], back()]));
+  }
+  await show(ctx, `🔎 بحلّل <b>${esc(site)}</b> دلوقتي… (حوالي دقيقة)`, []);
+  try {
+    const [{ profileWebsite }, { auditPage }] = await Promise.all([import("./business-profile.server"), import("./seo-audit.server")]);
+    const [profile, audit] = await Promise.all([profileWebsite(site), auditPage(site).catch(() => null)]);
+    const fails = (audit?.checks ?? []).filter((c) => c.status !== "pass").slice(0, 6);
+    await (ctx.admin as any).from("brain_items").insert({
+      workspace_id: ctx.link.workspace_id, kind: "note", title: `كشف شامل: ${profile.name}`, meta: site,
+      body: [profile.summary, audit ? `درجة السيو: ${audit.score}/100` : "", fails.map((c) => `• ${c.label}: ${c.fix ?? c.detail}`).join("\n")].filter(Boolean).join("\n"),
+      used_by: ["sonny", "nour", "dana", "adam", "eva", "sam"],
+    });
+    await show(
+      ctx,
+      [
+        `🔎 <b>${esc(profile.name)}</b> · ${esc(profile.industry)}`,
+        esc(cut(profile.summary, 500)),
+        profile.audience ? `\n🎯 <b>الجمهور:</b> ${esc(cut(profile.audience, 200))}` : "",
+        profile.usp ? `💎 <b>ميزتك:</b> ${esc(cut(profile.usp, 200))}` : "",
+        profile.competitors.length ? `🥊 <b>منافسين:</b> ${esc(profile.competitors.slice(0, 4).join("، "))}` : "",
+        audit ? `\n📊 <b>درجة السيو:</b> ${audit.score}/100` : "",
+        ...fails.map((c) => `${c.status === "fail" ? "🔴" : "🟡"} ${esc(c.label)} — ${esc(cut(c.fix ?? c.detail, 140))}`),
+        profile.firstTasks.length ? `\n<b>أول خطوات مقترحة:</b>\n${profile.firstTasks.slice(0, 3).map((t) => `• ${esc(t.title)}`).join("\n")}` : "",
+        "\n🧠 اتحفظ في معرفة الشركة وكل الموظفين هيستخدموه.",
+      ].filter(Boolean).join("\n"),
+      [[{ text: "🔄 أعد التحليل", callback_data: "zd" }, { text: "📈 ترتيب جوجل", callback_data: "zr" }], back()],
+    );
+  } catch (e) {
+    await show(ctx, `⚠️ ${esc(e instanceof Error ? e.message : "تعذّر تحليل الموقع")}`, [[{ text: "🔄 جرّب تاني", callback_data: "zd" }], back()]);
+  }
+}
+
+// ── مراقبة البريد (أمل): رسائل تحتاج رد + كشف الاحتيال + حفظ الرد كمسودة ──
+type InboxCache = { at: number; items: { threadId: string; from: string; subject: string; reply: string }[] };
+async function viewInbox(ctx: UiCtx) {
+  await show(ctx, "📬 أمل بتراجع بريدك دلوقتي…", []);
+  try {
+    const { scanWorkspaceInbox } = await import("./inbox-watch.server");
+    const r = await scanWorkspaceInbox(ctx.link.workspace_id);
+    if (!r.connected) {
+      return void (await show(ctx, "📬 <b>مراقبة البريد</b>\nاربط Gmail الأول وأمل هتتابع بريدك وتجهز الردود.", [[{ text: "🔌 اربط Gmail", callback_data: "ic:gmail" }], back()]));
+    }
+    const items = r.items.filter((i) => i.needsReply || i.scam).slice(0, 6);
+    const { writePending, readPending } = await import("./telegram-ui.server");
+    const cache: InboxCache = { at: Date.now(), items: items.map((i) => ({ threadId: i.threadId, from: i.from, subject: i.subject, reply: i.reply })) };
+    await writePending(ctx.admin, ctx.link, { ...readPending(ctx.link), inbox: cache } as any);
+    const kb: Button[][] = items.map((i, n) =>
+      i.scam ? [{ text: `🚨 احتيال: ${cut(i.subject, 30)}`, callback_data: `zix:${n}` }] : [{ text: `✉️ ${cut(i.subject, 34)}`, callback_data: `zix:${n}` }],
+    );
+    kb.push([{ text: "🔄 افحص تاني", callback_data: "zi" }], back());
+    await show(
+      ctx,
+      items.length
+        ? `📬 <b>${items.length} رسالة محتاجة انتباهك</b>\n${items.map((i) => `${i.scam ? "🚨" : i.urgency === "high" ? "🔴" : "•"} <b>${esc(cut(i.from, 40))}</b>: ${esc(cut(i.summary || i.snippet, 120))}${i.scam ? `\n   ⚠️ ${esc(cut(i.scamReason, 100))}` : ""}`).join("\n")}\n\nاضغط أي رسالة تشوف الرد الجاهز.`
+        : "📬 بريدك نضيف — مفيش رسائل محتاجة رد دلوقتي ✅",
+      kb,
+    );
+  } catch (e) {
+    await show(ctx, `⚠️ ${esc(e instanceof Error ? e.message : "تعذّر فحص البريد")}`, [[{ text: "🔄 جرّب تاني", callback_data: "zi" }], back()]);
+  }
+}
+
+async function inboxItem(ctx: UiCtx, n: number, save: boolean): Promise<string | undefined> {
+  const { readPending } = await import("./telegram-ui.server");
+  const it = ((readPending(ctx.link) as any).inbox as InboxCache | undefined)?.items?.[n];
+  if (!it) return void (await show(ctx, "القائمة قديمة، افحص البريد تاني.", [[{ text: "📬 افحص البريد", callback_data: "zi" }], back()]));
+  if (save) {
+    const { gmailCall } = await import("./inbox-watch.server");
+    const call = await gmailCall(ctx.link.workspace_id);
+    if (!call) return "اربط Gmail أولاً";
+    const { base64Url, rfc822 } = await import("./direct-actions.server");
+    const to = it.from.match(/<([^>]+)>/)?.[1] ?? it.from;
+    const subject = /^re:/i.test(it.subject) ? it.subject : `Re: ${it.subject}`;
+    await call(`https://gmail.googleapis.com/gmail/v1/users/me/drafts`, "POST", { message: { threadId: it.threadId, raw: base64Url(rfc822(to, subject, it.reply)) } });
+    await show(ctx, `✅ الرد اتحفظ مسودة في Gmail على «${esc(cut(it.subject, 60))}». راجعه وابعته من بريدك وقت ما تحب.`, [[{ text: "📬 باقي الرسائل", callback_data: "zi" }], back()]);
+    return "اتحفظ مسودة";
+  }
+  await show(
+    ctx,
+    `✉️ <b>${esc(it.subject)}</b>\nمن: ${esc(it.from)}\n\n<b>الرد الجاهز:</b>\n${esc(it.reply || "—")}`,
+    [...(it.reply ? [[{ text: "💾 احفظه مسودة في Gmail", callback_data: `zis:${n}` }]] : []), [{ text: "⬅️ الرسائل", callback_data: "zi" }, { text: "🏠 القائمة", callback_data: "m" }]],
+  );
+  return undefined;
+}
+
+// ── مركز الثقة: ما يتذكّره الفريق + سجل ما نفّذه فعلياً، مع «انسَ هذا» ──
+async function viewTrust(ctx: UiCtx) {
+  const ws = ctx.link.workspace_id;
+  const [{ data: mem }, { data: audit }] = await Promise.all([
+    (ctx.admin as any).from("brand_memories").select("id, kind, content").eq("workspace_id", ws).is("valid_until", null).order("created_at", { ascending: false }).limit(6),
+    (ctx.admin as any).from("action_audit").select("employee_id, provider, status, summary, created_at").eq("workspace_id", ws).order("created_at", { ascending: false }).limit(6),
+  ]);
+  const memories = (mem ?? []) as { id: string; kind: string; content: string }[];
+  const acts = (audit ?? []) as { employee_id: string; provider: string; status: string; summary: string; created_at: string }[];
+  await show(
+    ctx,
+    [
+      "🛡️ <b>مركز الثقة</b>",
+      "\n<b>اللي الفريق فاكره عنك:</b>",
+      ...(memories.length ? memories.map((m, i) => `${i + 1}. ${esc(cut(m.content, 110))}`) : ["— لسه مفيش"]),
+      "\n<b>آخر اللي اتنفّذ فعلياً:</b>",
+      ...(acts.length ? acts.map((a) => `${a.status === "success" || a.status === "done" ? "✅" : "⚠️"} ${esc(a.employee_id)} · ${esc(providerLabel(a.provider))} — ${esc(cut(a.summary, 80))} <i>${fmt(a.created_at)}</i>`) : ["— لسه مفيش"]),
+      memories.length ? "\nاضغط رقم أي ذكرى عشان الفريق ينساها." : "",
+    ].filter(Boolean).join("\n"),
+    [
+      ...(memories.length ? [memories.map((m, i) => ({ text: `🗑️ ${i + 1}`, callback_data: `zyf:${m.id}` }))] : []),
+      [{ text: "🔄 حدّث", callback_data: "zy" }],
+      back(),
+    ],
+  );
+}
+
 /** موجّه أزرار الشاشات الإضافية (البادئة z). يعيد null لو الزر مش تبعها. */
 export async function handleExtraCallback(ctx: UiCtx, op: string, a: string, b = ""): Promise<string | undefined | null> {
   const ws = ctx.link.workspace_id;
@@ -387,6 +504,20 @@ export async function handleExtraCallback(ctx: UiCtx, op: string, a: string, b =
       return void (await viewAnalytics(ctx));
     case "zt":
       return void (await viewTeamProjects(ctx));
+    case "zd":
+      return void (await runDiscovery(ctx));
+    case "zi":
+      return void (await viewInbox(ctx));
+    case "zix":
+      return await inboxItem(ctx, Number(a), false);
+    case "zis":
+      return await inboxItem(ctx, Number(a), true);
+    case "zy":
+      return void (await viewTrust(ctx));
+    case "zyf":
+      await (ctx.admin as any).from("brand_memories").update({ valid_until: new Date().toISOString() }).eq("id", a).eq("workspace_id", ws);
+      await viewTrust(ctx);
+      return "🗑️ الفريق نسيها";
     case "ztv":
       return void (await viewTeamProject(ctx, a));
     case "zta":

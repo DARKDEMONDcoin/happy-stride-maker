@@ -174,7 +174,9 @@ export async function viewMenu(ctx: UiCtx) {
       [{ text: "🛫 الطيار الآلي", callback_data: "zo" }, { text: "📈 ترتيب جوجل", callback_data: "zr" }],
       [{ text: "📊 الزيارات", callback_data: "zv" }, { text: "⏰ الأتمتة", callback_data: "au" }],
       [{ text: "👤 حسابي", callback_data: "za" }, { text: "⚙️ الإعدادات", callback_data: "s" }],
-      [{ text: "🤝 مشاريع الفريق", callback_data: "zt" }, { text: "🔑 دخول الموقع (اختياري)", callback_data: "zal" }],
+      [{ text: "🤝 مشاريع الفريق", callback_data: "zt" }, { text: "🔎 حلّل موقعي", callback_data: "zd" }],
+      [{ text: "📬 مراقبة البريد", callback_data: "zi" }, { text: "🛡️ مركز الثقة", callback_data: "zy" }],
+      [{ text: "🔑 دخول الموقع (اختياري)", callback_data: "zal" }],
     ],
   );
 }
