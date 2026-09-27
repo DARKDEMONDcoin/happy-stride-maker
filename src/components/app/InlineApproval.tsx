@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { Check, Loader2, Pencil, X } from "lucide-react";
@@ -18,12 +18,15 @@ export function InlineApproval({
   employeeName,
   onEdit,
   onDone,
+  command,
 }: {
   workspaceId?: string | undefined;
   taskId: string;
   employeeName: string;
   onEdit?: (text: string) => void;
   onDone?: () => void;
+  /** أمر من الشات: اعتماد أو رفض بسبب — يتغيّر n مع كل أمر جديد. */
+  command?: { n: number; kind: "approve" | "reject"; reason?: string } | null;
 }) {
   const { data: tasks } = useTasks(workspaceId);
   const update = useUpdateTask(workspaceId);
@@ -36,7 +39,7 @@ export function InlineApproval({
   const task = (tasks ?? []).find((item) => item.id === taskId);
   const output = sanitizePostBody(task?.output ?? task?.detail ?? "") || task?.detail || "";
 
-  const act = async (status: "done" | "rejected") => {
+  const act = async (status: "done" | "rejected", overrideReason?: string) => {
     setBusy(status);
     try {
       await update.mutateAsync({
@@ -63,7 +66,7 @@ export function InlineApproval({
             kind: status === "done" ? "approved" : "rejected",
             reason:
               status === "rejected"
-                ? reason.trim() || "رفض المالك المخرج من المحادثة"
+                ? (overrideReason ?? reason).trim() || "رفض المالك المخرج من المحادثة"
                 : "اعتمد المالك المخرج من المحادثة",
           },
         });
@@ -75,6 +78,16 @@ export function InlineApproval({
       setRejecting(false);
     }
   };
+
+  const lastCommand = useRef(command?.n ?? 0);
+  useEffect(() => {
+    if (!command || command.n === lastCommand.current) return;
+    lastCommand.current = command.n;
+    if (state !== "open" || busy) return;
+    if (command.kind === "reject") void act("rejected", command.reason ?? "");
+    else void act("done");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [command?.n]);
 
   if (state !== "open") {
     return (
