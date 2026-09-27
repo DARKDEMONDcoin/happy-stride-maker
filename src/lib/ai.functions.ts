@@ -1081,6 +1081,7 @@ export async function runEmployeeTurn(
         .replace(/```\s*$/i, "")
         .trim();
       const parsed: unknown = JSON.parse(cleaned);
+      console.log("[dbgraw]", agentId, cleaned.slice(0, 1500));
       // النموذج قد يعيد كائناً واحداً أو مصفوفة كائنات — نتعامل مع الحالتين.
       const items = (Array.isArray(parsed) ? parsed : [parsed]).filter(
         (
@@ -1111,6 +1112,7 @@ export async function runEmployeeTurn(
         .filter(Boolean);
       deliverables = items
         .flatMap((x) => [x.deliverable, ...(Array.isArray(x.deliverables) ? x.deliverables : [])])
+        .map((d) => (d && !d.title && d.body ? { ...d, title: "المخرج" } : d))
         .filter((d): d is Deliverable => Boolean(d?.title && d.body))
         // لا نفرض المنصة إلا على مخرج بلا منصة، حتى لا تُدمج خطة متعددة المنصات في منصة واحدة.
         .map((d) => (d.channel ? d : askedTargets[0] ? { ...d, channel: askedTargets[0] } : d));
@@ -1145,6 +1147,31 @@ export async function runEmployeeTurn(
       }
       if (replies.length) {
         reply = replies.join("\n\n");
+        // النموذج أحياناً يضع المتن الحقيقي (بريف، خطة) في حقل خاص به ويترك «reply» ملخصاً
+        // من سطرين — فكان المستخدم يرى المقدمة فقط. نعرض الحقول الإضافية كمتن مقروء.
+        if (!deliverables.length && reply.length < 500) {
+          const KNOWN = new Set(["reply", "deliverable", "deliverables", "needs_connection", "action"]);
+          const render = (v: unknown, depth = 0): string => {
+            if (v == null) return "";
+            if (typeof v === "string" || typeof v === "number") return String(v);
+            if (Array.isArray(v)) return v.map((x) => `- ${render(x, depth + 1).replace(/\n/g, " ")}`).join("\n");
+            if (typeof v === "object")
+              return Object.entries(v as Record<string, unknown>)
+                .map(([k, x]) =>
+                  typeof x === "object" && x !== null && depth < 2
+                    ? `${"#".repeat(Math.min(depth + 3, 5))} ${k}\n\n${render(x, depth + 1)}`
+                    : `**${k}:** ${render(x, depth + 1)}`,
+                )
+                .join("\n\n");
+            return "";
+          };
+          const extra = items
+            .flatMap((x) => Object.entries(x as Record<string, unknown>).filter(([k]) => !KNOWN.has(k)))
+            .map(([k, v]) => (typeof v === "object" ? `### ${k}\n\n${render(v)}` : `**${k}:** ${render(v)}`))
+            .join("\n\n")
+            .trim();
+          if (extra.length > 200) reply = `${reply}\n\n${extra}`;
+        }
       } else if (deliverables.length) {
         reply = deliverables.map((d) => `### ${d.title}\n\n${d.body}`).join("\n\n---\n\n");
       } else {
@@ -1359,7 +1386,6 @@ export async function runEmployeeTurn(
     // مخرج واحد جاهز للنشر: ما يراه المالك في المحادثة هو نص المنشور نفسه لا غير —
     // بلا مقدمة «جهّزت لك…» ولا أقسام التوقيت والخطوة التالية، حتى لا يختلط كلام
     // الموظف بنص المنشور ولا تلتقط لوحة النشر الجزء الخطأ.
-    console.log("[dbg]", agentId, "reply", reply.length, "dels", deliverables.map((d) => (d.body ?? "").length));
     if (deliverables.length === 1) {
       const postBody = (deliverables[0]?.body ?? "").trim();
       if (postBody.length > 60) reply = postBody;
@@ -1472,7 +1498,6 @@ export async function runEmployeeTurn(
       }
     }
 
-    console.log("[dbg2]", agentId, "reply", reply.length);
     const footers = toolBlocks.map((t) => t.footer).filter(Boolean);
     if (footers.length) reply = `${reply.trim()}\n\n> ${footers.join(" · ")}`;
 
