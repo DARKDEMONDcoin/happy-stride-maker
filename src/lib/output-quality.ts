@@ -104,10 +104,12 @@ export function detectKind(request: string, text: string, employeeId: string): O
   const all = `${request}\n${text}`.toLowerCase();
   const ar = `${request}\n${text}`;
   const isEmail = /\b(email|subject)\b/.test(all) || /(?:رسالة|بريد|رد على|الموضوع:)/.test(ar);
-  // منشورات السوشيال ومخرجات التصميم لها معايير قابلة للقياس مثل بقية الأنواع.
-  if (/(?:منشور|تغريدة|كابشن|ستوري|ريلز|كاروسيل|هاشتاق)/.test(ar) && !isEmail) return "social";
-  if (/(?:وصف صورة|بروميت|تصميم|نص بديل|ألوان العلامة|مقاس)/.test(ar) || employeeId === "dana")
-    return "design";
+  // النوع يُحدَّد من الطلب أولاً: كلمة «مقاس» أو «منشور» داخل خطة سيو لا تجعلها تصميماً أو منشوراً.
+  const socialAsked = /(?:منشور|بوست|تغريدة|كابشن|ستوري|ريلز|كاروسيل|هاشتاق)/.test(request);
+  const designAsked = /(?:وصف صورة|بروميت|تصميم|صمم|صمّم|هوية بصرية|لوجو|شعار|بوستر|نص بديل)/.test(request);
+  if (socialAsked && !isEmail && (employeeId === "sonny" || !designAsked)) return "social";
+  if (designAsked || employeeId === "dana") return "design";
+  if (!request.trim() && /(?:منشور|تغريدة|كابشن|هاشتاق)/.test(ar) && !isEmail) return "social";
   if (isEmail) return "email";
   if (/(?:مقال|تدوينة|محتوى الصفحة|meta description|وصف ميتا)/i.test(ar) || employeeId === "nour")
     return "article";
