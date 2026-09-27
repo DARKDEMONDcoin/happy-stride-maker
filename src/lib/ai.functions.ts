@@ -1081,7 +1081,6 @@ export async function runEmployeeTurn(
         .replace(/```\s*$/i, "")
         .trim();
       const parsed: unknown = JSON.parse(cleaned);
-      console.log("[dbgraw]", agentId, cleaned.slice(0, 1500));
       // النموذج قد يعيد كائناً واحداً أو مصفوفة كائنات — نتعامل مع الحالتين.
       const items = (Array.isArray(parsed) ? parsed : [parsed]).filter(
         (
