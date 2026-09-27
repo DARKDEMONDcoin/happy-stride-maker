@@ -608,17 +608,18 @@ async function runPendingAction(ctx: UiCtx) {
   try {
     const { runEmployeeActionServer } = await import("./employee-actions.server");
     const out = await runEmployeeActionServer(ctx.admin, { workspaceId: ctx.link.workspace_id, actionId: a.id, values: a.values });
-    const r = out.result as { submitted?: boolean; filled?: string[]; missed?: string[]; screenshotUrl?: string | null } | null;
+    const r = out.result as { submitted?: boolean; verification?: string; verificationReason?: string; filled?: string[]; missed?: string[]; screenshotUrl?: string | null } | null;
     const extra =
       out.provider === "browser" && r
         ? [
             r.filled?.length ? `\nاتملى: ${esc(r.filled.join("، "))}` : "",
             r.missed?.length ? `\nملقتش: ${esc(r.missed.join("، "))}` : "",
-            r.submitted ? "\nتم إرسال النموذج." : "\nملأت بدون إرسال.",
+            r.verificationReason ? `\n${esc(r.verificationReason)}` : r.submitted ? "\nتم إرسال النموذج." : "\nملأت بدون إرسال.",
             r.screenshotUrl ? `\n<a href="${esc(r.screenshotUrl)}">📸 لقطة الشاشة</a>` : "",
           ].join("")
         : "";
-    await show(ctx, `✅ تم تنفيذ «${esc(a.label)}» بنجاح.${extra}`, [back()]);
+    const status = out.provider === "browser" && r?.verification === "needs_confirmation" ? "⚠️ تمت المحاولة وتحتاج تأكيدك" : "✅ تم التنفيذ بنجاح";
+    await show(ctx, `${status}: «${esc(a.label)}».${extra}`, [back()]);
   } catch (e) {
     await show(ctx, `⚠️ تعذّر تنفيذ «${esc(a.label)}»:\n${esc(e instanceof Error ? e.message : "خطأ غير معروف")}`, [back()]);
   }

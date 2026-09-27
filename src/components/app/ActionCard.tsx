@@ -49,6 +49,8 @@ export function ActionCard({
     filled?: string[];
     missed?: string[];
     submitted?: boolean;
+    verification?: "verified" | "needs_confirmation" | "not_submitted";
+    verificationReason?: string;
     screenshotUrl?: string | null;
     kind?: string;
     status?: string;
@@ -84,7 +86,9 @@ export function ActionCard({
       if (res && typeof res === "object" && "result" in res && res.result && typeof res.result === "object") {
         setOutcome(res.result as typeof outcome);
       }
-      onExecuted?.(true);
+      const browserOutcome = res.result as typeof outcome;
+      const verified = action.provider !== "browser" || browserOutcome?.verification !== "needs_confirmation";
+      onExecuted?.(verified, browserOutcome?.verificationReason);
       // تبقى البطاقة ظاهرة بنتيجة التنفيذ؛ الإغلاق فقط بزر «لاحقاً».
     },
     onError: (e: unknown) => {
@@ -161,10 +165,12 @@ export function ActionCard({
       <div className="mt-3 flex items-center gap-3 rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm font-semibold animate-pop-in">
         <AppIcon name={action.provider} className="size-5 shrink-0" />
         <span>
-          تم تنفيذ «{action.label}» فعلياً على {appLabel(action.provider)}.
+          {outcome?.verification === "needs_confirmation"
+            ? `تمت محاولة «${action.label}» على ${appLabel(action.provider)} وتحتاج تأكيدك.`
+            : `تم تنفيذ «${action.label}» فعلياً على ${appLabel(action.provider)}.`}
           {outcome?.filled?.length ? ` اتملى: ${outcome.filled.join("، ")}.` : ""}
           {outcome?.missed?.length ? ` ملقتش: ${outcome.missed.join("، ")}.` : ""}
-          {outcome ? (outcome.submitted ? " تم إرسال النموذج." : " ملأت بدون إرسال.") : ""}
+          {outcome?.verificationReason ? ` ${outcome.verificationReason}` : ""}
         </span>
         {outcome?.screenshotUrl ? (
           <a

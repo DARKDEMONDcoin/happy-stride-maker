@@ -741,6 +741,7 @@ function ChatView({
   const [actionDone, setActionDone] = useState(false);
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [revising, setRevising] = useState(false);
+  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const [taskCommand, setTaskCommand] = useState<
     { n: number; kind: "approve" | "reject"; reason?: string } | null
   >(null);
@@ -1085,11 +1086,17 @@ function ChatView({
 
   /** يحاول تنفيذ الرسالة كأمر على المخرج الجاهز؛ يعيد true لو استُهلكت. */
   const handleCommand = (body: string): boolean => {
+    const actionAvailable = Boolean(pendingAction);
     const actionOpen = Boolean(pendingAction && !actionDone);
-    const cmd = parseChatCommand(body, actionOpen || Boolean(savedTask));
+    const cmd = parseChatCommand(body, actionAvailable || Boolean(savedTask));
     if (!cmd) return false;
-    if (actionOpen && pendingAction && workspace) {
+    if (actionAvailable && pendingAction && workspace) {
       if (cmd.kind === "approve") {
+        if (actionDone) {
+          pushLog("user", body);
+          pushLog("employee", "الإجراء ده اتنفّذ بالفعل. لو عايز نسخة جديدة اكتب التعديل المطلوب، وهعرضها لاعتماد جديد.", "error");
+          return true;
+        }
         pushLog("user", body);
         pushLog("employee", `تمام، بنفّذ «${pendingAction.label}» دلوقتي…`, "busy");
         setActionRunSignal((n) => n + 1);
@@ -1119,6 +1126,7 @@ function ChatView({
         })
           .then((res) => {
             setPendingAction((a) => (a && a.id === current.id ? { ...a, values: res.values } : a));
+            if (actionDone) setActionDone(false);
             setActionNote(res.summary);
             if (cmd.thenApprove) {
               pushLog("employee", `${res.summary} وببعته دلوقتي…`, "busy");
@@ -1155,7 +1163,12 @@ function ChatView({
 
   const submit = (text: string) => {
     const body = text.trim();
-    if (!body || !workspace || busy) return;
+    if (!body || !workspace) return;
+    if (busy) {
+      setQueuedMessage(body);
+      setDraft("");
+      return;
+    }
     if (handleCommand(body)) {
       setDraft("");
       setStickToBottom(true);
@@ -1172,6 +1185,13 @@ function ChatView({
     setPending(body);
     send.mutate(body);
   };
+
+  useEffect(() => {
+    if (busy || !queuedMessage) return;
+    const next = queuedMessage;
+    setQueuedMessage(null);
+    submit(next);
+  }, [busy, queuedMessage]);
 
   /** إيقاف الطلب بعد الإرسال: نُعيد النص إلى مربع الإدخال ونُهمل النتيجة. */
   const stopSending = () => {
