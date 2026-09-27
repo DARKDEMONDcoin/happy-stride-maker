@@ -13,6 +13,7 @@ type TgUpdate = {
   edited_message?: TgMessage;
   channel_post?: TgMessage;
   edited_channel_post?: TgMessage;
+  my_chat_member?: { chat?: { id?: number; type?: string }; new_chat_member?: { status?: string } };
   callback_query?: {
     id: string;
     data?: string;
@@ -36,11 +37,11 @@ async function ensureBotSetup(botToken: string, requestUrl: string, shared: bool
     const { tg, webhookSecret } = await import("@/lib/telegram.server");
     const { BOT_COMMANDS } = await import("@/lib/telegram-ui.server");
     const info = await tg<{ url?: string; allowed_updates?: string[] }>(botToken, "getWebhookInfo");
-    if (info.url && !(info.allowed_updates ?? []).includes("callback_query")) {
+    if (info.url && !["callback_query", "my_chat_member"].every((u) => (info.allowed_updates ?? []).includes(u))) {
       await tg(botToken, "setWebhook", {
         url: info.url || requestUrl,
         secret_token: await webhookSecret(botToken),
-        allowed_updates: ["message", "edited_message", "channel_post", "callback_query"],
+        allowed_updates: ["message", "edited_message", "channel_post", "callback_query", "my_chat_member"],
         drop_pending_updates: false,
       });
     }
@@ -58,10 +59,33 @@ async function ensureBotSetup(botToken: string, requestUrl: string, shared: bool
     console.error("[telegram] bot setup failed:", e);
   }
 }
+/**
+ * يحجز رقم التحديث ذرّياً في قاعدة البيانات: ينجح مرة واحدة فقط لكل تحديث،
+ * حتى لو أعاد تيليجرام الإرسال بعد دقيقة أو وصل لنسخة خادم مختلفة.
+ */
+async function claimUpdate(
+  admin: typeof import("@/integrations/supabase/client.server").supabaseAdmin,
+  linkId: string,
+  updateId: number,
+): Promise<boolean> {
+  const { data } = await admin
+    .from("command_links")
+    .update({ last_update_id: updateId, last_seen_at: new Date().toISOString() })
+    .eq("id", linkId)
+    .or(`last_update_id.is.null,last_update_id.lt.${updateId}`)
+    .select("id");
+  return Boolean(data?.length);
+}
+
 type TgMessage = {
   chat?: { id?: number; title?: string; username?: string; type?: string };
   from?: { id?: number };
   message_id?: number;
+  reply_to_message?: {
+    message_id?: number;
+    from?: { is_bot?: boolean };
+    reply_markup?: { inline_keyboard?: { callback_data?: string }[][] };
+  };
   text?: string;
   caption?: string;
   voice?: { file_id: string; duration?: number; mime_type?: string };
@@ -115,6 +139,17 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
         // مرة لكل بوت: نفعّل استقبال الأزرار ونسجّل قائمة الأوامر.
         void ensureBotSetup(botToken, request.url, shared);
 
+        // ── المستخدم حظر البوت أو فك الحظر: نوقف/نرجّع التنبيهات فوراً ──
+        const mcm = update.my_chat_member;
+        if (mcm?.chat?.type === "private" && typeof mcm.chat.id === "number") {
+          const st = mcm.new_chat_member?.status;
+          const q = supabaseAdmin.from("command_links").update({ status: st === "kicked" ? "blocked" : "active" })
+            .eq("channel", "telegram").eq("external_id", String(mcm.chat.id));
+          if (st === "kicked") await q.eq("status", "active");
+          else if (st === "member") await q.eq("status", "blocked");
+          return Response.json({ ok: true });
+        }
+
         // ── ضغطة زر في القوائم التفاعلية ──
         const cb = update.callback_query;
         if (cb?.id) {
@@ -155,6 +190,11 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                   { admin: supabaseAdmin, botToken, chatId: cbChat },
                   cb.data,
                 );
+              } else if (
+                typeof update.update_id === "number" &&
+                !(await claimUpdate(supabaseAdmin, link.id, update.update_id))
+              ) {
+                // إعادة إرسال من تيليجرام بعد مهلة طويلة (أو من نسخة خادم أخرى): لا ننفّذ مرتين.
               } else {
                 const { handleCallback } = await import("@/lib/telegram-ui.server");
                 toast = await handleCallback(
