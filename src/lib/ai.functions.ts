@@ -591,26 +591,30 @@ export async function runEmployeeTurn(
       : "";
 
     // تنفيذ فعلي لقدرات الأقسام من داخل الشات (فحص سيو، ترتيب، تقويم، أفكار، أداء).
-    emit({ type: "step", label: "أفتح أدوات المنصة وأشغّل الفحص والتحليل بنفسي" });
+    if (turnPlan.useTools) {
+      emit({ type: "step", label: "أفتح أدوات المنصة وأشغّل الفحص والتحليل بنفسي" });
+    }
     let toolBlocks: { block: string; footer: string; tool: string }[] = [];
     let toolsFailed = false;
-    try {
-      const { runChatTools } = await import("./chat-tools.server");
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      toolBlocks = await runChatTools(supabaseAdmin, {
-        workspaceId: data.workspaceId,
-        employeeId: agentId,
-        message: data.message,
-        website: ws.website,
-        country: ws.country,
-        connected,
-        targets: askedTargets,
-        industry: workspace.industry,
-        brand: workspace.name,
-      });
-    } catch (e) {
-      toolsFailed = true;
-      console.warn("[chat-tools] skipped:", e instanceof Error ? e.message : e);
+    if (turnPlan.useTools) {
+      try {
+        const { runChatTools } = await import("./chat-tools.server");
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        toolBlocks = await runChatTools(supabaseAdmin, {
+          workspaceId: data.workspaceId,
+          employeeId: agentId,
+          message: data.message,
+          website: ws.website,
+          country: ws.country,
+          connected,
+          targets: askedTargets,
+          industry: workspace.industry,
+          brand: workspace.name,
+        });
+      } catch (e) {
+        toolsFailed = true;
+        console.warn("[chat-tools] skipped:", e instanceof Error ? e.message : e);
+      }
     }
     if (toolBlocks.length) {
       emit({

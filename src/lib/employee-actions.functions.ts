@@ -84,7 +84,10 @@ export const runEmployeeAction = createServerFn({ method: "POST" })
     return {
       actionId: res.actionId,
       provider: res.provider,
-      ok: browserResult?.verification !== "needs_confirmation",
+      ok:
+        res.provider !== "browser" ||
+        browserResult?.verification === undefined ||
+        browserResult.verification === "verified",
       result: safe,
     };
   });
