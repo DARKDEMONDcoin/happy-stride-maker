@@ -56,7 +56,7 @@ export function ActionCard({
     liveViewUrl?: string | null;
     steps?: { n: number; note: string; url: string; screenshotUrl: string | null }[];
   } | null>(null);
-  const [preview, setPreview] = useState<{ title: string | null; screenshotUrl: string | null } | null>(null);
+  const [preview, setPreview] = useState<{ title: string | null; screenshotUrl: string | null; error?: string | null } | null>(null);
 
   const exec = useServerFn(runEmployeeAction);
   const previewFn = useServerFn(previewBrowserAction);
@@ -246,6 +246,10 @@ export function ActionCard({
             معاينة حية للصفحة قبل التنفيذ{preview.title ? ` — ${preview.title}` : ""}
           </figcaption>
         </figure>
+      ) : preview?.error ? (
+        <p className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground" dir="auto">
+          تعذّرت المعاينة: {preview.error}
+        </p>
       ) : null}
 
       {revisedNote ? (
