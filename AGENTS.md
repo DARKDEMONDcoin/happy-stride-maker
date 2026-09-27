@@ -18,3 +18,4 @@
 - Employee tools live in `employee-toolbelt.ts`; browser tasks stop before payment.
 - Chat action commands use `chat-commands.ts`; edits use `reviseEmployeeAction`.
 - All employee paths derive research depth, reasoning effort, risk, and success checks from `src/lib/turn-plan.ts`; this prevents conflicting execution decisions.
+- Telegram buttons stay inside the chat: `telegram-ui*.server.ts` keep no `publicOrigin()` deep links, and manual platform credentials are collected in-chat via `src/lib/telegram-connect.server.ts` so no flow depends on the website.

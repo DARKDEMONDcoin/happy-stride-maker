@@ -196,7 +196,6 @@ async function createAccount(ctx: Ctx, data: Record<string, string>) {
 }
 
 async function explainHave(ctx: Ctx) {
-  const { publicOrigin } = await import("./telegram.server");
   await setState(ctx, "have", {});
   await send(
     ctx,
@@ -208,7 +207,7 @@ async function explainHave(ctx: Ctx) {
       "أو أرسل هنا كود الربط المكوّن من ٦ رموز إن كان معك.",
     ].join("\n"),
     [
-      [{ text: "🌐 فتح إعدادات تيليجرام في سهل", url: `${publicOrigin()}/app/settings` }],
+      [{ text: "🆕 مش عندي حساب — سجّلني هنا", callback_data: "ob:new" }],
       [{ text: "↩️ رجوع", callback_data: "ob:back" }],
     ],
   );
