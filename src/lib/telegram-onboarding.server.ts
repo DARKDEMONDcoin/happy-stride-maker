@@ -196,7 +196,6 @@ async function createAccount(ctx: Ctx, data: Record<string, string>) {
 }
 
 async function explainHave(ctx: Ctx) {
-  const { publicOrigin } = await import("./telegram.server");
   await setState(ctx, "have", {});
   await send(
     ctx,
