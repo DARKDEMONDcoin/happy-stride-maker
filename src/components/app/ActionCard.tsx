@@ -248,7 +248,15 @@ export function ActionCard({
         </figure>
       ) : null}
 
+      {revisedNote ? (
+        <p className="mt-2 rounded-lg bg-background/70 px-2.5 py-1.5 text-xs font-semibold text-foreground animate-pop-in" dir="auto">
+          ✏️ {revisedNote}
+        </p>
+      ) : null}
       {error ? <p className="mt-2 text-xs font-semibold text-coral">{error}</p> : null}
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        تقدر تتحكم من الشات: اكتب «ابعت» للتنفيذ، أو «عدّل … ثم ابعت»، أو «إلغاء».
+      </p>
       {missing.length ? (
         <p className="mt-2 text-xs font-semibold text-muted-foreground">
           أكمل: {missing.join("، ")}
