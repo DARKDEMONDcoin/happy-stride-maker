@@ -59,6 +59,8 @@ import {
   useSaveBrandKnowledge,
 } from "@/lib/data";
 import { askEmployee, runSkill } from "@/lib/ai.functions";
+import { reviseEmployeeAction } from "@/lib/employee-actions.functions";
+import { parseChatCommand } from "@/lib/chat-commands";
 import { saveChatSignal } from "@/lib/learning.functions";
 import { SkillPalette } from "@/components/app/SkillPalette";
 import { Thinking } from "@/components/app/Thinking";
@@ -731,6 +733,21 @@ function ChatView({
   } | null>(null);
   /** إجراء حقيقي جهّزه الموظف على تكامله المربوط — ينتظر اعتماد المالك بضغطة. */
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  /** أوامر المالك على المخرج الجاهز من الشات نفسه (ابعت/عدّل/إلغاء) وردود الموظف عليها. */
+  const [commandLog, setCommandLog] = useState<
+    { id: number; role: "user" | "employee"; text: string; tone?: "ok" | "error" | "busy" }[]
+  >([]);
+  const [actionRunSignal, setActionRunSignal] = useState(0);
+  const [actionDone, setActionDone] = useState(false);
+  const [actionNote, setActionNote] = useState<string | null>(null);
+  const [revising, setRevising] = useState(false);
+  const [taskCommand, setTaskCommand] = useState<
+    { n: number; kind: "approve" | "reject"; reason?: string } | null
+  >(null);
+  const logSeq = useRef(0);
+  const pushLog = (role: "user" | "employee", text: string, tone?: "ok" | "error" | "busy") =>
+    setCommandLog((log) => [...log.filter((e) => e.tone !== "busy"), { id: ++logSeq.current, role, text, ...(tone ? { tone } : {}) }]);
+  const reviseFn = useServerFn(reviseEmployeeAction);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -950,6 +967,9 @@ function ChatView({
       setSavedTask(res?.createdTaskId ?? null);
       setNeedsConnection(res?.needsConnection ?? null);
       setPendingAction((res?.action as PendingAction | null | undefined) ?? null);
+      setActionDone(false);
+      setActionNote(null);
+      setCommandLog([]);
       void qc.invalidateQueries({ queryKey: ["messages-last", workspace?.id] });
       void qc.invalidateQueries({ queryKey: ["conversations", workspace?.id, id] });
       void qc.invalidateQueries({ queryKey: ["tasks", workspace?.id] });
@@ -1063,9 +1083,84 @@ function ChatView({
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [draft]);
 
+  /** يحاول تنفيذ الرسالة كأمر على المخرج الجاهز؛ يعيد true لو استُهلكت. */
+  const handleCommand = (body: string): boolean => {
+    const actionOpen = Boolean(pendingAction && !actionDone);
+    const cmd = parseChatCommand(body, actionOpen || Boolean(savedTask));
+    if (!cmd) return false;
+    if (actionOpen && pendingAction && workspace) {
+      if (cmd.kind === "approve") {
+        pushLog("user", body);
+        pushLog("employee", `تمام، بنفّذ «${pendingAction.label}» دلوقتي…`, "busy");
+        setActionRunSignal((n) => n + 1);
+        return true;
+      }
+      if (cmd.kind === "cancel" || cmd.kind === "reject") {
+        pushLog("user", body);
+        pushLog("employee", "تمام، لغيت الإجراء ومش هنفّذ حاجة.", "ok");
+        setPendingAction(null);
+        return true;
+      }
+      if (cmd.kind === "edit") {
+        if (revising) return true;
+        pushLog("user", body);
+        pushLog("employee", "بعدّل حسب كلامك…", "busy");
+        setRevising(true);
+        const current = pendingAction;
+        void reviseFn({
+          data: {
+            workspaceId: workspace.id,
+            employeeId: id,
+            label: current.label,
+            inputs: current.inputs.map((i) => ({ name: i.name, label: i.label })),
+            values: current.values,
+            instruction: cmd.instruction,
+          },
+        })
+          .then((res) => {
+            setPendingAction((a) => (a && a.id === current.id ? { ...a, values: res.values } : a));
+            setActionNote(res.summary);
+            if (cmd.thenApprove) {
+              pushLog("employee", `${res.summary} وببعته دلوقتي…`, "busy");
+              window.setTimeout(() => setActionRunSignal((n) => n + 1), 80);
+            } else {
+              pushLog("employee", `${res.summary} راجع البطاقة، واكتب «ابعت» لما تكون جاهز أو عدّل تاني.`, "ok");
+            }
+          })
+          .catch((e: unknown) =>
+            pushLog("employee", e instanceof Error ? e.message : "تعذّر تطبيق التعديل.", "error"),
+          )
+          .finally(() => setRevising(false));
+        return true;
+      }
+    }
+    if (savedTask && (cmd.kind === "approve" || cmd.kind === "reject" || cmd.kind === "cancel")) {
+      pushLog("user", body);
+      const kind = cmd.kind === "approve" ? "approve" : "reject";
+      setTaskCommand((c) => ({
+        n: (c?.n ?? 0) + 1,
+        kind,
+        ...(cmd.kind === "reject" ? { reason: cmd.reason } : {}),
+      }));
+      pushLog(
+        "employee",
+        kind === "approve" ? "اتعتمد ✅ — لو عايز تعديل بعد كده قولّي." : "تمام، رفضته وهتعلّم من ملاحظتك.",
+        "ok",
+      );
+      return true;
+    }
+    // «عدّل …» على مخرج نصي يذهب للموظف كطلب تعديل عادي مع سياق المحادثة.
+    return false;
+  };
+
   const submit = (text: string) => {
     const body = text.trim();
     if (!body || !workspace || busy) return;
+    if (handleCommand(body)) {
+      setDraft("");
+      setStickToBottom(true);
+      return;
+    }
     setError(null);
     setSavedTask(null);
     setStickToBottom(true);
@@ -1445,8 +1540,41 @@ function ChatView({
               />
             ) : null}
 
+            {commandLog.length ? (
+              <div className="space-y-2" aria-live="polite">
+                {commandLog.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={cn(
+                      "flex animate-pop-in",
+                      entry.role === "user" ? "justify-start" : "justify-end",
+                    )}
+                  >
+                    <p
+                      dir="auto"
+                      className={cn(
+                        "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm",
+                        entry.role === "user"
+                          ? "bg-foreground text-background"
+                          : entry.tone === "error"
+                            ? "border border-coral/30 bg-coral/10 text-coral"
+                            : "border border-border bg-card text-foreground",
+                      )}
+                    >
+                      {entry.tone === "busy" ? (
+                        <Loader2 className="me-1.5 inline size-3.5 animate-spin" />
+                      ) : null}
+                      {entry.role === "employee" ? <b className="me-1">{member.name}:</b> : null}
+                      {entry.text}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             {savedTask && !busy ? (
               <InlineApproval
+                command={taskCommand}
                 workspaceId={workspace?.id}
                 taskId={savedTask}
                 employeeName={member.name}
@@ -1462,6 +1590,18 @@ function ChatView({
               <ActionCard
                 workspaceId={workspace.id}
                 action={pendingAction}
+                runSignal={actionRunSignal}
+                revisedNote={actionNote}
+                onExecuted={(ok, message) => {
+                  if (ok) setActionDone(true);
+                  pushLog(
+                    "employee",
+                    ok
+                      ? `تم ✅ نفّذت «${pendingAction.label}». لو عايز تعديل أو خطوة تانية قولّي.`
+                      : (message ?? "تعذّر التنفيذ."),
+                    ok ? "ok" : "error",
+                  );
+                }}
                 onDone={() => setPendingAction(null)}
               />
             ) : null}
