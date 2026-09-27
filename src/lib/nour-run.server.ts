@@ -1104,6 +1104,11 @@ export async function executeSkill(
   // إزالة المجاملات الافتتاحية («أهلاً بك… بصفتي…») حتى يبدأ المخرج بالمحتوى مباشرة.
   // لو كان المخرج كله مجاملة فلا نُفرغه — نُعيد الأصل بدل تسليم صفحة فارغة.
   output = sanitizeActionClaims(sanitizeOutput(stripPreamble(output) || output), connected);
+  // الأقواس النائبة ([اسم العلامة]…) تُملأ هنا أيضاً كي لا تصل في المهام المجدولة كما هي.
+  if (output.includes("[")) {
+    const { fillPlaceholders } = await import("./ai.functions");
+    output = fillPlaceholders(output, workspace.name, ws.website ?? null, []);
+  }
 
   // حَكَم الجودة: لا يخرج أي مخرج للمالك قبل أن يُقاس على معايير قبول القدرة،
   // ويُعاد كتابته مرة واحدة عند رسوبه.
