@@ -91,7 +91,10 @@ export function ActionCard({
         setOutcome(res.result as typeof outcome);
       }
       const browserOutcome = res.result as typeof outcome;
-      const verified = action.provider !== "browser" || browserOutcome?.verification !== "needs_confirmation";
+       const verified =
+         action.provider !== "browser" ||
+         browserOutcome?.verification === undefined ||
+         browserOutcome.verification === "verified";
       onExecuted?.(verified, browserOutcome?.verificationReason);
       // تبقى البطاقة ظاهرة بنتيجة التنفيذ؛ الإغلاق فقط بزر «لاحقاً».
     },
@@ -173,7 +176,9 @@ export function ActionCard({
       <div className="mt-3 flex items-center gap-3 rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm font-semibold animate-pop-in">
         <AppIcon name={action.provider} className="size-5 shrink-0" />
         <span>
-          {outcome?.verification === "needs_confirmation"
+           {outcome?.verification === "not_submitted"
+             ? `لم يتم إرسال «${action.label}» على ${appLabel(action.provider)}.`
+             : outcome?.verification === "needs_confirmation"
             ? `تمت محاولة «${action.label}» على ${appLabel(action.provider)} وتحتاج تأكيدك.`
             : `تم تنفيذ «${action.label}» فعلياً على ${appLabel(action.provider)}.`}
           {outcome?.filled?.length ? ` اتملى: ${outcome.filled.join("، ")}.` : ""}
