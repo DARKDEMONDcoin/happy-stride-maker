@@ -152,7 +152,17 @@ export async function browsePage(url: string, opts: { screenshot?: boolean } = {
   }
 }
 
-export type FillResult = { url: string; submitted: boolean; blocked?: string; filled: string[]; missed: string[]; screenshotUrl: string | null; pageText: string };
+export type FillResult = {
+  url: string;
+  submitted: boolean;
+  verification: "verified" | "needs_confirmation" | "not_submitted";
+  verificationReason: string;
+  blocked?: string;
+  filled: string[];
+  missed: string[];
+  screenshotUrl: string | null;
+  pageText: string;
+};
 
 /**
  * يملأ نموذجاً على موقع خارجي (بعد موافقة المالك فقط — يُستدعى من مسار الإجراءات المعتمدة).
@@ -223,7 +233,7 @@ export async function fillForm(url: string, fields: string, opts: { submit: bool
       return { filled, missed };
     })()`;
     const r = (await evalJs(fillScript)) as { blocked?: string; filled: string[]; missed: string[] };
-    let submitted = false;
+    let clickedSubmit = false;
     let blocked = r.blocked;
     if (!blocked && opts.submit && r.filled.length) {
       const clicked = await evalJs(`(() => {
@@ -235,13 +245,40 @@ export async function fillForm(url: string, fields: string, opts: { submit: bool
         b.click(); return 'ok';
       })()`);
       if (clicked === "payment") blocked = "payment";
-      else if (clicked === "ok") { submitted = true; await wait(4000); }
+      else if (clicked === "ok") { clickedSubmit = true; await wait(4000); }
     }
     const shot = await cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 70 }, sessionId).catch(() => null);
     const screenshotUrl = shot?.data ? await uploadShot(shot.data) : null;
     const after = (await evalJs("JSON.stringify({u:location.href,x:(document.body&&document.body.innerText||'').slice(0,1500)})")) as string;
     const p = JSON.parse(after || "{}") as { u?: string; x?: string };
-    return { url: p.u ?? url, submitted, ...(blocked ? { blocked } : {}), filled: r.filled, missed: r.missed, screenshotUrl, pageText: p.x ?? "" };
+    const pageText = p.x ?? "";
+    const finalUrl = p.u ?? url;
+    const successSignal = /(thank you|thanks for|success|submitted|received|we'?ll be in touch|تم الإرسال|تم استلام|شكراً|نجاح|سنتواصل)/iu.test(pageText);
+    const urlChanged = finalUrl.replace(/#.*$/, "") !== url.replace(/#.*$/, "");
+    const verification = !clickedSubmit
+      ? "not_submitted"
+      : successSignal || urlChanged
+        ? "verified"
+        : "needs_confirmation";
+    const verificationReason =
+      verification === "verified"
+        ? successSignal
+          ? "ظهرت رسالة نجاح في الصفحة بعد الإرسال."
+          : "انتقلت الصفحة إلى رابط جديد بعد الإرسال."
+        : verification === "needs_confirmation"
+          ? "تم الضغط على زر الإرسال، لكن الصفحة لم تعرض دليلاً واضحاً على الاستلام."
+          : "تم ملء الحقول فقط ولم يُضغط زر الإرسال.";
+    return {
+      url: finalUrl,
+      submitted: verification === "verified",
+      verification,
+      verificationReason,
+      ...(blocked ? { blocked } : {}),
+      filled: r.filled,
+      missed: r.missed,
+      screenshotUrl,
+      pageText,
+    };
   } finally {
     cdp?.close();
     await fetch(`${BB}/sessions/${session.id}`, {
