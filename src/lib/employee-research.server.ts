@@ -409,7 +409,8 @@ export async function employeeResearch(
     });
   };
   let tavilyUsed = looksLikeGibberish(seed);
-  if (intent.tavilyFirst && tavilyAvailable()) {
+  const tavilyKey = await (await import("./secrets.server")).getSecret("TAVILY_API_KEY").catch(() => "");
+  if (intent.tavilyFirst && tavilyAvailable(tavilyKey)) {
     tavilyUsed = true;
     jobs.unshift(async (): Promise<Chunk | null> => {
       const rows = await tavilyBoth(tOpts);
@@ -443,7 +444,7 @@ export async function employeeResearch(
 
   // احتياطي: أدلة قليلة أو بلا أي تأكيد متقاطع ← طلب Tavily واحد يسد الفجوة.
   const weak = ranked.length < 5 || !ranked.some((r) => r.corroborated);
-  if (!tavilyUsed && weak && tavilyAvailable()) {
+  if (!tavilyUsed && weak && tavilyAvailable(tavilyKey)) {
     const rows = await tavilyBoth({ ...tOpts, timeoutMs: 6_000 });
     if (rows.length) {
       chunks.push({ part: "", used: "Tavily", findings: rows });

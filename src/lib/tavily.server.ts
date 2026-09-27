@@ -18,7 +18,7 @@ const inflight = new Map<string, Promise<Finding[]>>();
 let day = "";
 let used = 0;
 
-export function tavilyAvailable(apiKey?: string): boolean {
+export function tavilyAvailable(apiKey: string | undefined | null): boolean {
   const today = new Date().toISOString().slice(0, 10);
   if (today !== day) {
     day = today;
