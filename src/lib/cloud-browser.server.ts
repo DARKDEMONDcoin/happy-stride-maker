@@ -257,7 +257,9 @@ export async function fillForm(url: string, fields: string, opts: { submit: bool
     const urlChanged = finalUrl.replace(/#.*$/, "") !== url.replace(/#.*$/, "");
     const verification = !clickedSubmit
       ? "not_submitted"
-      : successSignal || urlChanged
+      : r.missed.length
+        ? "needs_confirmation"
+        : successSignal || urlChanged
         ? "verified"
         : "needs_confirmation";
     const verificationReason =
@@ -266,7 +268,9 @@ export async function fillForm(url: string, fields: string, opts: { submit: bool
           ? "ظهرت رسالة نجاح في الصفحة بعد الإرسال."
           : "انتقلت الصفحة إلى رابط جديد بعد الإرسال."
         : verification === "needs_confirmation"
-          ? "تم الضغط على زر الإرسال، لكن الصفحة لم تعرض دليلاً واضحاً على الاستلام."
+          ? r.missed.length
+            ? `لم يُعثر على بعض الحقول (${r.missed.join("، ")})، لذلك لا يمكن تأكيد اكتمال الإرسال.`
+            : "تم الضغط على زر الإرسال، لكن الصفحة لم تعرض دليلاً واضحاً على الاستلام."
           : "تم ملء الحقول فقط ولم يُضغط زر الإرسال.";
     return {
       url: finalUrl,

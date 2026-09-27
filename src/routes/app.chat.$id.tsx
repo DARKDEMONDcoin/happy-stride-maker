@@ -1087,7 +1087,6 @@ function ChatView({
   /** يحاول تنفيذ الرسالة كأمر على المخرج الجاهز؛ يعيد true لو استُهلكت. */
   const handleCommand = (body: string): boolean => {
     const actionAvailable = Boolean(pendingAction);
-    const actionOpen = Boolean(pendingAction && !actionDone);
     const cmd = parseChatCommand(body, actionAvailable || Boolean(savedTask));
     if (!cmd) return false;
     if (actionAvailable && pendingAction && workspace) {
