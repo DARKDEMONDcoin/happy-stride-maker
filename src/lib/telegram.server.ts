@@ -211,7 +211,7 @@ export async function registerWebhook(workspaceId: string, botToken: string, sha
   await tg(botToken, "setWebhook", {
     url: shared ? sharedWebhookUrl() : webhookUrlFor(workspaceId),
     secret_token: await webhookSecret(botToken),
-    allowed_updates: ["message", "edited_message", "channel_post", "callback_query"],
+    allowed_updates: ["message", "edited_message", "channel_post", "callback_query", "my_chat_member"],
     drop_pending_updates: false,
   });
 }

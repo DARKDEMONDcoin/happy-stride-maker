@@ -26,6 +26,11 @@ export type TgFile = { file_id: string; file_size?: number; mime_type?: string; 
 export type TgIncoming = {
   message_id?: number;
   chat?: { id?: number };
+  reply_to_message?: {
+    message_id?: number;
+    from?: { is_bot?: boolean };
+    reply_markup?: { inline_keyboard?: { callback_data?: string }[][] };
+  };
   text?: string;
   caption?: string;
   voice?: TgFile;
@@ -36,6 +41,17 @@ export type TgIncoming = {
 };
 
 const MAX_VOICE_SECONDS = 300;
+
+/** يستخرج رقم المهمة من أزرار رسالة المخرج (tv/tw/ae/…:<uuid>). */
+export function taskIdFromMarkup(markup?: { inline_keyboard?: { callback_data?: string }[][] }): string | null {
+  for (const row of markup?.inline_keyboard ?? []) {
+    for (const btn of row) {
+      const m = /^(tv|tw|twg|twn|ae|aa|ar|ary):([0-9a-f-]{36})/i.exec(btn.callback_data ?? "");
+      if (m?.[2]) return m[2];
+    }
+  }
+  return null;
+}
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // حد تنزيل Bot API
 
 async function send(botToken: string, chatId: number, markdown: string) {
@@ -150,8 +166,14 @@ export async function handleTelegramTeam(
 
   // تيليجرام يعيد إرسال التحديث لو تأخر الرد — لا ننفّذ الطلب مرتين.
   if (typeof args.updateId === "number") {
-    if (link.last_update_id && args.updateId <= Number(link.last_update_id)) return true;
-    await admin.from("command_links").update({ last_update_id: args.updateId, last_seen_at: new Date().toISOString() }).eq("id", link.id);
+    // حجز ذرّي: ينجح مرة واحدة فقط حتى مع إعادة الإرسال المتأخرة أو تعدد نسخ الخادم.
+    const { data: claimed } = await admin
+      .from("command_links")
+      .update({ last_update_id: args.updateId, last_seen_at: new Date().toISOString() })
+      .eq("id", link.id)
+      .or(`last_update_id.is.null,last_update_id.lt.${args.updateId}`)
+      .select("id");
+    if (!claimed?.length) return true;
   }
 
   const workspaceId = link.workspace_id;
@@ -206,6 +228,16 @@ export async function handleTelegramTeam(
       text: "✖️ اتلغت الخطوة المعلّقة. اكتب طلبك الجديد أو /menu للقائمة.",
     });
     return true;
+  }
+
+  // ── رد مباشر (Reply) على رسالة مخرج معيّن: التعديل يروح للمخرج ده بالظبط ──
+  const replied = message.reply_to_message;
+  if (replied?.from?.is_bot && raw && !attachments.length && parsed.kind !== "command") {
+    const taskId = taskIdFromMarkup(replied.reply_markup);
+    if (taskId) {
+      await ui.writePending(admin, uiCtx.link, { wait: { kind: "rewrite_note", id: taskId } });
+      if (await ui.handlePendingText(uiCtx, raw)) return true;
+    }
   }
 
   // ── رد نصي ينتظره البوت (تعديل مخرج / ملاحظة / سبب رفض) ──
