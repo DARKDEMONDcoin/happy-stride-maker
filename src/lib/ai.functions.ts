@@ -157,7 +157,7 @@ const FORM_ACTION_RE =
  */
 /** طلبات تحتاج تنقلاً حقيقياً بين مواقع: حجز، شراء، مقارنة عروض وأسعار حيّة. */
 const BROWSE_TASK_RE =
-  /(احجز|احجزلي|حجز\s+(?:فندق|طيران|تذكر|رحلة|موعد)|تذكرة|تذاكر|اشتري|اشتريلي|أشتري|اطلب\s+لي|قارن\s+(?:أسعار|الأسعار|عروض|العروض)|أرخص|ارخص|\bbook\b|\bbuy\b|cheapest|compare prices)/i;
+  /(احجز|احجزلي|حجز\s+(?:فندق|طيران|تذكر|رحلة|موعد)|تذكرة|تذاكر|اشتري|اشتريلي|أشتري|اطلب\s+لي|قارن(?:ي|وا)?(?:\s+(?:لي|لنا|بين))*\s+(?:أسعار|الأسعار|اسعار|عروض|العروض|أفضل|افضل)|مقارنة\s+(?:أسعار|اسعار|عروض)|أفضل\s+(?:سعر|الأسعار)|أرخص|ارخص|\bbook\b|\bbuy\b|cheapest|compare prices)/i;
 
 function browserActionValues(message: string, urls: string[]): Record<string, string> | null {
   if (!urls.length || !FORM_ACTION_RE.test(message)) return null;
@@ -549,7 +549,11 @@ export async function runEmployeeTurn(
             };
             // بحث عميق: جولات متتابعة تقرأ داخل الصفحات وتستخرج الأرقام بمصادرها.
             // يُشغَّل حين يطلبه المستخدم صراحةً أو حين يكون المطلوب تقريراً/دراسة.
-            if (DEEP_RESEARCH_RE.test(data.message)) {
+            if (
+              DEEP_RESEARCH_RE.test(data.message) ||
+              (wantsResearch.reason === "market" && longForm) ||
+              /(قارن|مقارنة|compare).{0,80}(بالتفصيل|بالأرقام|مع أرقام|أسعار|منافس)/iu.test(data.message)
+            ) {
               const m = await import("./deep-research.server");
               return m.deepResearch(agentId, wantsResearch.topic, {
                 ...opts,
@@ -1107,6 +1111,7 @@ export async function runEmployeeTurn(
         .filter(Boolean);
       deliverables = items
         .flatMap((x) => [x.deliverable, ...(Array.isArray(x.deliverables) ? x.deliverables : [])])
+        .map((d) => (d && !d.title && d.body ? { ...d, title: "المخرج" } : d))
         .filter((d): d is Deliverable => Boolean(d?.title && d.body))
         // لا نفرض المنصة إلا على مخرج بلا منصة، حتى لا تُدمج خطة متعددة المنصات في منصة واحدة.
         .map((d) => (d.channel ? d : askedTargets[0] ? { ...d, channel: askedTargets[0] } : d));
@@ -1141,6 +1146,31 @@ export async function runEmployeeTurn(
       }
       if (replies.length) {
         reply = replies.join("\n\n");
+        // النموذج أحياناً يضع المتن الحقيقي (بريف، خطة) في حقل خاص به ويترك «reply» ملخصاً
+        // من سطرين — فكان المستخدم يرى المقدمة فقط. نعرض الحقول الإضافية كمتن مقروء.
+        if (!deliverables.length && reply.length < 500) {
+          const KNOWN = new Set(["reply", "deliverable", "deliverables", "needs_connection", "action"]);
+          const render = (v: unknown, depth = 0): string => {
+            if (v == null) return "";
+            if (typeof v === "string" || typeof v === "number") return String(v);
+            if (Array.isArray(v)) return v.map((x) => `- ${render(x, depth + 1).replace(/\n/g, " ")}`).join("\n");
+            if (typeof v === "object")
+              return Object.entries(v as Record<string, unknown>)
+                .map(([k, x]) =>
+                  typeof x === "object" && x !== null && depth < 2
+                    ? `${"#".repeat(Math.min(depth + 3, 5))} ${k}\n\n${render(x, depth + 1)}`
+                    : `**${k}:** ${render(x, depth + 1)}`,
+                )
+                .join("\n\n");
+            return "";
+          };
+          const extra = items
+            .flatMap((x) => Object.entries(x as Record<string, unknown>).filter(([k]) => !KNOWN.has(k)))
+            .map(([k, v]) => (typeof v === "object" ? `### ${k}\n\n${render(v)}` : `**${k}:** ${render(v)}`))
+            .join("\n\n")
+            .trim();
+          if (extra.length > 200) reply = `${reply}\n\n${extra}`;
+        }
       } else if (deliverables.length) {
         reply = deliverables.map((d) => `### ${d.title}\n\n${d.body}`).join("\n\n---\n\n");
       } else {
@@ -1251,6 +1281,12 @@ export async function runEmployeeTurn(
 
     // في المحادثة الحرة (سؤال/دردشة) لا مخرجات ولا طلبات ربط — إجابة فقط.
     if (intent !== "work") {
+      // المصنّف قد يخطئ فيعدّ طلب عمل («اعمل بريف…») دردشة؛ حينها لا نُسقط المتن الذي
+      // كتبه الموظف فعلاً — نعرضه داخل الرد بدل أن يرى المستخدم المقدمة وحدها.
+      const bodies = deliverables
+        .filter((d) => d.body && !reply.includes(d.body.slice(0, 80)))
+        .map((d) => `### ${d.title}\n\n${d.body}`);
+      if (bodies.length) reply = `${reply.trim()}\n\n${bodies.join("\n\n---\n\n")}`;
       deliverables = [];
       needsConnection = null;
       if (pendingAction?.id !== "team-browser-task") pendingAction = null;
@@ -1455,7 +1491,12 @@ export async function runEmployeeTurn(
     if (deliverables.length === 1) {
       // حارس أخير بعد المراجعة الآلية: حتى لو أعادت المراجعة مقدمة أو تذييل قياس،
       // يبقى الرد القابل للنشر هو متن المخرج المنظم وحده.
-      const postBody = extractPostText(deliverables[0]?.body ?? reply);
+      const fullBody = (deliverables[0]?.body ?? reply).trim();
+      const extracted = extractPostText(fullBody);
+      // المستخلِص مصمَّم لنصوص المنشورات؛ على البريفات والتقارير المنظمة كان يقتطع
+      // الفقرة الأولى فقط ويُسقط المتن كله — فنُبقي المتن الكامل حين يكون القصّ جائراً.
+      const postBody =
+        extracted && (agentId === "sonny" || extracted.length >= fullBody.length * 0.6) ? extracted : fullBody;
       if (postBody) {
         deliverables[0]!.body = postBody;
         reply = postBody;

@@ -101,7 +101,7 @@ export function researchIntent(message: string): ResearchIntent {
   // شغل داخلي بحت («ابحث عن أسعار خدماتنا»): بياناتنا ليست على الإنترنت،
   // والبحث عنها تأخير يأتي بنتائج غريبة — يتقدّم حتى على فعل البحث الصريح.
   // تُستثنى المقارنة الصريحة بالسوق أو ذكر منافس/ترند.
-  if (OURS.test(text) && !MARKET.test(text) && !EXTERNAL.test(text)) return none;
+  if (OURS.test(text) && !MARKET.test(text) && !EXTERNAL.test(text) && !GAP.test(text)) return none;
 
   if (EXPLICIT.test(text)) return { wanted: true, explicit: true, reason: "explicit", topic };
 
