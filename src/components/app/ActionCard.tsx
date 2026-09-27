@@ -3,7 +3,7 @@
  * الموظف يجهّز الإجراء بقيمه كاملة على تكامله المربوط (بريد، موعد، صفقة، رسالة…)
  * والمالك يعتمده بضغطة واحدة — أو يعدّل أي حقل قبل التنفيذ.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
@@ -84,14 +84,33 @@ export function ActionCard({
       if (res && typeof res === "object" && "result" in res && res.result && typeof res.result === "object") {
         setOutcome(res.result as typeof outcome);
       }
+      onExecuted?.(true);
       // تبقى البطاقة ظاهرة بنتيجة التنفيذ؛ الإغلاق فقط بزر «لاحقاً».
     },
-    onError: (e: unknown) => setError(e instanceof Error ? e.message : "تعذّر تنفيذ الإجراء."),
+    onError: (e: unknown) => {
+      const message = e instanceof Error ? e.message : "تعذّر تنفيذ الإجراء.";
+      setError(message);
+      onExecuted?.(false, message);
+    },
   });
 
   const missing = action.inputs
     .filter((i) => i.required && !(values[i.name] ?? "").trim())
     .map((i) => i.label);
+
+  const lastSignal = useRef(runSignal);
+  useEffect(() => {
+    if (runSignal === lastSignal.current) return;
+    lastSignal.current = runSignal;
+    if (done || run.isPending) return;
+    if (missing.length) {
+      setEdit(true);
+      onExecuted?.(false, `ناقص: ${missing.join("، ")} — اكتبه في الشات أو في البطاقة.`);
+      return;
+    }
+    run.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runSignal]);
 
   if (done && outcome?.kind === "browser-task") {
     const last = [...(outcome.steps ?? [])].reverse().find((st) => st.screenshotUrl);
