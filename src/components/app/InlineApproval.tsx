@@ -39,7 +39,7 @@ export function InlineApproval({
   const task = (tasks ?? []).find((item) => item.id === taskId);
   const output = sanitizePostBody(task?.output ?? task?.detail ?? "") || task?.detail || "";
 
-  const act = async (status: "done" | "rejected") => {
+  const act = async (status: "done" | "rejected", overrideReason?: string) => {
     setBusy(status);
     try {
       await update.mutateAsync({
@@ -66,7 +66,7 @@ export function InlineApproval({
             kind: status === "done" ? "approved" : "rejected",
             reason:
               status === "rejected"
-                ? reason.trim() || "رفض المالك المخرج من المحادثة"
+                ? (overrideReason ?? reason).trim() || "رفض المالك المخرج من المحادثة"
                 : "اعتمد المالك المخرج من المحادثة",
           },
         });
@@ -84,8 +84,8 @@ export function InlineApproval({
     if (!command || command.n === lastCommand.current) return;
     lastCommand.current = command.n;
     if (state !== "open" || busy) return;
-    if (command.kind === "reject") setReason(command.reason ?? "");
-    void act(command.kind === "approve" ? "done" : "rejected");
+    if (command.kind === "reject") void act("rejected", command.reason ?? "");
+    else void act("done");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [command?.n]);
 
