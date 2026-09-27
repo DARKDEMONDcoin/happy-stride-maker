@@ -30,7 +30,7 @@ function connectCdp(url: string): Promise<Cdp> {
     const ws = new WebSocket(url);
     let id = 0;
     const pending = new Map<number, { res: (v: any) => void; rej: (e: Error) => void }>();
-    const timer = setTimeout(() => reject(new Error("cdp connect timeout")), 15_000);
+    const timer = setTimeout(() => reject(new Error("cdp connect timeout")), 25_000);
     ws.addEventListener("open", () => {
       clearTimeout(timer);
       resolve({
@@ -41,7 +41,7 @@ function connectCdp(url: string): Promise<Cdp> {
             ws.send(JSON.stringify({ id: mid, method, params, ...(sessionId ? { sessionId } : {}) }));
             setTimeout(() => {
               if (pending.delete(mid)) rej(new Error(`cdp timeout: ${method}`));
-            }, 30_000);
+            }, 45_000);
           }),
         close: () => {
           try { ws.close(); } catch { /* ignore */ }
@@ -79,13 +79,25 @@ async function uploadShot(base64: string): Promise<string | null> {
   }
 }
 
+const failures = new Map<string, string>();
+function fail(url: string, reason: string): null {
+  failures.set(url, reason);
+  if (failures.size > 200) failures.delete(failures.keys().next().value as string);
+  return null;
+}
+/** سبب آخر فشل لفتح رابط، بلغة المالك — بدل ابتلاع الخطأ بصمت. */
+export function browseFailureReason(url: string): string | null {
+  return failures.get(url) ?? null;
+}
+
 /** يفتح الرابط في متصفح سحابي حقيقي ويعيد النص المعروض ولقطة شاشة. للقراءة فقط. */
 export async function browsePage(url: string, opts: { screenshot?: boolean } = {}): Promise<BrowsedPage | null> {
-  if (!/^https?:\/\//i.test(url)) return null;
+  if (!/^https?:\/\//i.test(url)) return fail(url, "الرابط غير صالح (يجب أن يبدأ بـ http أو https).");
+  failures.delete(url);
   const s = await getSecrets(["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"] as const).catch(() => null);
   const apiKey = s?.BROWSERBASE_API_KEY;
   const projectId = s?.BROWSERBASE_PROJECT_ID;
-  if (!apiKey || !projectId) return null;
+  if (!apiKey || !projectId) return fail(url, "المتصفح السحابي غير مفعّل بعد على المنصة.");
 
   const created = await fetch(`${BB}/sessions`, {
     method: "POST",
@@ -94,7 +106,7 @@ export async function browsePage(url: string, opts: { screenshot?: boolean } = {
   });
   if (!created.ok) {
     console.warn("[browser] session create failed", created.status);
-    return null;
+    return fail(url, created.status === 429 ? "المتصفح السحابي مشغول الآن — أعد المحاولة بعد دقيقة." : "تعذّر تشغيل المتصفح السحابي الآن.");
   }
   const session = (await created.json()) as { id: string; connectUrl: string };
   let cdp: Cdp | null = null;
@@ -107,7 +119,7 @@ export async function browsePage(url: string, opts: { screenshot?: boolean } = {
     await cdp.send("Page.enable", {}, sessionId);
     await cdp.send("Page.navigate", { url }, sessionId);
     // انتظار تحميل المحتوى الديناميكي.
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 32; i++) {
       await new Promise((r) => setTimeout(r, 750));
       const st = await cdp.send("Runtime.evaluate", { expression: "document.readyState", returnByValue: true }, sessionId);
       if (st?.result?.value === "complete" && i >= 3) break;
@@ -124,11 +136,12 @@ export async function browsePage(url: string, opts: { screenshot?: boolean } = {
       if (shot?.data) screenshotUrl = await uploadShot(shot.data);
     }
     const text = (parsed.x ?? "").replace(/\n{3,}/g, "\n\n").trim();
-    if (text.length < 50) return null;
+    if (text.length < 50) return fail(url, "الصفحة فُتحت لكنها بلا محتوى مقروء (قد تكون محمية أو تتطلب تسجيل دخول).");
     return { url: parsed.u ?? url, title: parsed.t || url, text: text.slice(0, 20_000), screenshotUrl };
   } catch (e) {
-    console.warn("[browser] failed:", e instanceof Error ? e.message : e);
-    return null;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[browser] failed:", msg);
+    return fail(url, /timeout/i.test(msg) ? "الموقع استغرق وقتاً أطول من المسموح في التحميل." : "انقطع الاتصال بالموقع أثناء الفتح.");
   } finally {
     cdp?.close();
     await fetch(`${BB}/sessions/${session.id}`, {

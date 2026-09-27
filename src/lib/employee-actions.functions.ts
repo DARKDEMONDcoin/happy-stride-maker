@@ -47,9 +47,13 @@ export const previewBrowserAction = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertOwner(context.supabase, data.workspaceId);
-    const { browsePage } = await import("./cloud-browser.server");
+    const { browsePage, browseFailureReason } = await import("./cloud-browser.server");
     const page = await browsePage(data.url, { screenshot: true });
-    return { title: page?.title ?? null, screenshotUrl: page?.screenshotUrl ?? null };
+    return {
+      title: page?.title ?? null,
+      screenshotUrl: page?.screenshotUrl ?? null,
+      error: page ? null : browseFailureReason(data.url),
+    };
   });
 
 /** تنفيذ إجراء فعلي (إرسال بريد، حجز موعد، تحديث CRM…). */
