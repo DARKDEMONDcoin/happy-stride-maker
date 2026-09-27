@@ -24,12 +24,24 @@ export function ActionCard({
   workspaceId,
   action,
   onDone,
+  runSignal = 0,
+  onExecuted,
+  revisedNote,
 }: {
   workspaceId: string;
   action: PendingAction;
   onDone?: () => void;
+  /** يزيد عند أمر «ابعت/اعتمد» من الشات لتنفيذ الإجراء بلا ضغط الزر. */
+  runSignal?: number;
+  onExecuted?: (ok: boolean, message?: string) => void;
+  /** ملخّص آخر تعديل طُبّق بأمر من الشات. */
+  revisedNote?: string | null;
 }) {
   const [values, setValues] = useState<Record<string, string>>(action.values ?? {});
+  /** التعديل بأمر نصي يستبدل القيم المعروضة. */
+  useEffect(() => {
+    setValues(action.values ?? {});
+  }, [action.values]);
   const [edit, setEdit] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
