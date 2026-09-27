@@ -108,7 +108,8 @@ export async function judgeAndImprove(input: JudgeInput): Promise<JudgeVerdict> 
   // مسار سريع: مخرج قصير اجتاز كل الفحوص الحتمية لا يحتاج جولة نموذج إضافية
   // (كانت تضيف ١٠–٤٠ ثانية على كل منشور أو رسالة قصيرة بلا أي تحسين فعلي).
   if (audit.penalty === 0 && original.length < 900) {
-    return { score: 90, issues: [], output: original, revised: false, checked: true };
+    // لا درجة مصطنعة: الفحص الآلي اجتاز لكن الحَكَم لم يُستدعَ، فلا نعرض رقماً لم يُقَس.
+    return { score: 0, issues: [], output: original, revised: false, checked: false };
   }
 
   // المخرج يُعرض للحَكَم كاملاً تقريباً: القطع عند ٩ آلاف حرف كان يجعله يحكم على نص
