@@ -1421,8 +1421,8 @@ export async function runEmployeeTurn(
               criteria: qualityCriteria[agentId] ?? [],
               bannedWords: workspace.banned_words ?? [],
               maxRepairRounds: turnPlan.complexity === "deep" ? 2 : 1,
-              researchGap: wantsResearch.wanted
-                ? async (issues) => {
+              ...(wantsResearch.wanted
+                ? { researchGap: async (issues: string[]) => {
                     const { employeeResearch } = await import("./employee-research.server");
                     const gap = await employeeResearch(
                       agentId,
@@ -1435,8 +1435,8 @@ export async function runEmployeeTurn(
                       },
                     );
                     return gap.block;
-                  }
-                : undefined,
+                  } }
+                : {}),
             }),
           )
           .catch((error: unknown) => {

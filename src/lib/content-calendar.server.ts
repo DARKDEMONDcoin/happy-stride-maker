@@ -106,9 +106,17 @@ export function extractJsonList<T extends object>(raw: string, requiredKey: keyo
 }
 
 async function workspaceContext(admin: Admin, workspaceId: string) {
-  const [{ data: ws }, { data: brain }, { data: linked }, { data: recent }] = await Promise.all([
+  const [{ data: ws }, { data: brain }, { data: durable }, { data: linked }, { data: recent }, learning] = await Promise.all([
     admin.from("workspaces").select("*").eq("id", workspaceId).maybeSingle(),
     admin.from("brain_items").select("title, body, kind").eq("workspace_id", workspaceId),
+    admin
+      .from("brand_memories")
+      .select("content, kind")
+      .eq("workspace_id", workspaceId)
+      .is("superseded_by", null)
+      .or(`valid_until.is.null,valid_until.gt.${new Date().toISOString()}`)
+      .order("updated_at", { ascending: false })
+      .limit(80),
     admin
       .from("pipedream_accounts")
       .select("provider")
@@ -120,6 +128,9 @@ async function workspaceContext(admin: Admin, workspaceId: string) {
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
       .limit(30),
+    import("./learning.server")
+      .then(({ learningBlock }) => learningBlock(admin, workspaceId, "sonny"))
+      .catch(() => ({ block: "", lessonIds: [] as string[] })),
   ]);
   if (!ws) throw new Error("مساحة العمل غير موجودة.");
   const w = ws as typeof ws & {
@@ -127,11 +138,15 @@ async function workspaceContext(admin: Admin, workspaceId: string) {
     country?: string | null;
     profile?: unknown;
   };
-  const learning = (brain ?? []).find((b) => b.kind === "learning");
+  const legacyLearning = (brain ?? []).find((b) => b.kind === "learning");
+  const { durableMemoryItems } = await import("./memory.server");
   return {
     ws: w,
-    brain: (brain ?? []).filter((b) => b.kind !== "learning"),
-    learning: learning?.body ?? null,
+    brain: [
+      ...(brain ?? []).filter((b) => b.kind !== "learning"),
+      ...durableMemoryItems(durable ?? []),
+    ],
+    learning: learning.block || legacyLearning?.body || null,
     connected: (linked ?? []).map((l) => l.provider),
     recent: (recent ?? []) as unknown as {
       body: string;

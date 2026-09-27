@@ -38,9 +38,13 @@ export function ActionCard({
   revisedNote?: string | null;
 }) {
   const [values, setValues] = useState<Record<string, string>>(action.values ?? {});
+  const dispatched = useRef(false);
   /** التعديل بأمر نصي يستبدل القيم المعروضة. */
   useEffect(() => {
     setValues(action.values ?? {});
+    setDone(false);
+    setOutcome(null);
+    dispatched.current = false;
   }, [action.values]);
   const [edit, setEdit] = useState(false);
   const [done, setDone] = useState(false);
@@ -96,6 +100,9 @@ export function ActionCard({
       setError(message);
       onExecuted?.(false, message);
     },
+    onSettled: () => {
+      dispatched.current = false;
+    },
   });
 
   const missing = action.inputs
@@ -106,12 +113,13 @@ export function ActionCard({
   useEffect(() => {
     if (runSignal === lastSignal.current) return;
     lastSignal.current = runSignal;
-    if (done || run.isPending) return;
+    if (done || run.isPending || dispatched.current) return;
     if (missing.length) {
       setEdit(true);
       onExecuted?.(false, `ناقص: ${missing.join("، ")} — اكتبه في الشات أو في البطاقة.`);
       return;
     }
+    dispatched.current = true;
     run.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runSignal]);

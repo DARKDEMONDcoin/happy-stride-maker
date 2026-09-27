@@ -78,7 +78,15 @@ export const runEmployeeAction = createServerFn({ method: "POST" })
     });
     // نعيد نتيجة JSON آمنة للتسلسل (الموظفون قد يعيدون كائنات منصات خام).
     const safe = JSON.parse(JSON.stringify(res.result ?? null)) as Json;
-    return { actionId: res.actionId, provider: res.provider, ok: true as const, result: safe };
+    const browserResult = res.provider === "browser" && safe && typeof safe === "object"
+      ? (safe as { verification?: string })
+      : null;
+    return {
+      actionId: res.actionId,
+      provider: res.provider,
+      ok: browserResult?.verification !== "needs_confirmation",
+      result: safe,
+    };
   });
 
 /** مهمة تصفح متعددة الخطوات (قراءة وتنقل وبحث) — تتوقف عند أي خطوة حساسة. */
@@ -106,7 +114,7 @@ export const runBrowserTask = createServerFn({ method: "POST" })
       employeeId: "eva",
       actionId: "eva-browser-task",
       provider: "browser",
-      status: r.status === "error" ? "failed" : "done",
+      status: r.status === "done" ? "done" : r.status === "error" ? "failed" : "blocked",
       values: { title: data.goal.slice(0, 120), url: data.startUrl ?? "" },
     });
     return JSON.parse(JSON.stringify(r)) as typeof r;
