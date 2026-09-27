@@ -1281,6 +1281,12 @@ export async function runEmployeeTurn(
 
     // في المحادثة الحرة (سؤال/دردشة) لا مخرجات ولا طلبات ربط — إجابة فقط.
     if (intent !== "work") {
+      // المصنّف قد يخطئ فيعدّ طلب عمل («اعمل بريف…») دردشة؛ حينها لا نُسقط المتن الذي
+      // كتبه الموظف فعلاً — نعرضه داخل الرد بدل أن يرى المستخدم المقدمة وحدها.
+      const bodies = deliverables
+        .filter((d) => d.body && !reply.includes(d.body.slice(0, 80)))
+        .map((d) => `### ${d.title}\n\n${d.body}`);
+      if (bodies.length) reply = `${reply.trim()}\n\n${bodies.join("\n\n---\n\n")}`;
       deliverables = [];
       needsConnection = null;
       if (pendingAction?.id !== "team-browser-task") pendingAction = null;
