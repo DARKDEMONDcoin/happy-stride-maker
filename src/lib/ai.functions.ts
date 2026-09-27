@@ -1359,6 +1359,7 @@ export async function runEmployeeTurn(
     // مخرج واحد جاهز للنشر: ما يراه المالك في المحادثة هو نص المنشور نفسه لا غير —
     // بلا مقدمة «جهّزت لك…» ولا أقسام التوقيت والخطوة التالية، حتى لا يختلط كلام
     // الموظف بنص المنشور ولا تلتقط لوحة النشر الجزء الخطأ.
+    console.log("[dbg]", agentId, "reply", reply.length, "dels", deliverables.map((d) => (d.body ?? "").length));
     if (deliverables.length === 1) {
       const postBody = (deliverables[0]?.body ?? "").trim();
       if (postBody.length > 60) reply = postBody;
@@ -1471,6 +1472,7 @@ export async function runEmployeeTurn(
       }
     }
 
+    console.log("[dbg2]", agentId, "reply", reply.length);
     const footers = toolBlocks.map((t) => t.footer).filter(Boolean);
     if (footers.length) reply = `${reply.trim()}\n\n> ${footers.join(" · ")}`;
 
