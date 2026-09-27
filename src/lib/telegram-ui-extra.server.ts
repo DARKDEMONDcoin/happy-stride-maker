@@ -379,6 +379,7 @@ async function inboxItem(ctx: UiCtx, n: number, save: boolean): Promise<string |
     `✉️ <b>${esc(it.subject)}</b>\nمن: ${esc(it.from)}\n\n<b>الرد الجاهز:</b>\n${esc(it.reply || "—")}`,
     [...(it.reply ? [[{ text: "💾 احفظه مسودة في Gmail", callback_data: `zis:${n}` }]] : []), [{ text: "⬅️ الرسائل", callback_data: "zi" }, { text: "🏠 القائمة", callback_data: "m" }]],
   );
+  return undefined;
 }
 
 // ── مركز الثقة: ما يتذكّره الفريق + سجل ما نفّذه فعلياً، مع «انسَ هذا» ──
