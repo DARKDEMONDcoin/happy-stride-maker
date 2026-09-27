@@ -549,7 +549,11 @@ export async function runEmployeeTurn(
             };
             // بحث عميق: جولات متتابعة تقرأ داخل الصفحات وتستخرج الأرقام بمصادرها.
             // يُشغَّل حين يطلبه المستخدم صراحةً أو حين يكون المطلوب تقريراً/دراسة.
-            if (DEEP_RESEARCH_RE.test(data.message)) {
+            if (
+              DEEP_RESEARCH_RE.test(data.message) ||
+              (wantsResearch.reason === "market" && longForm) ||
+              /(قارن|مقارنة|compare).{0,80}(بالتفصيل|بالأرقام|مع أرقام|أسعار|منافس)/iu.test(data.message)
+            ) {
               const m = await import("./deep-research.server");
               return m.deepResearch(agentId, wantsResearch.topic, {
                 ...opts,
