@@ -16,11 +16,13 @@ type TgUpdate = {
   callback_query?: {
     id: string;
     data?: string;
+    from?: { id?: number };
     message?: { message_id?: number; chat?: { id?: number } };
   };
 };
 
 const setupDone = new Set<string>();
+const seenCallbacks = new Set<string>();
 const SAHL_BOT_NAME = "سهل";
 const SAHL_BOT_SHORT_DESCRIPTION =
   "فريقك العربي بالذكاء الاصطناعي، جاهز لتنفيذ شغلك من Telegram.";
@@ -118,6 +120,26 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
         if (cb?.id) {
           const cbChat = cb.message?.chat?.id;
           const { tg } = await import("@/lib/telegram.server");
+          // تيليجرام يعيد إرسال نفس الضغطة لو تأخرنا: ننفّذها مرة واحدة فقط.
+          if (seenCallbacks.has(cb.id)) return Response.json({ ok: true });
+          seenCallbacks.add(cb.id);
+          if (seenCallbacks.size > 2000) seenCallbacks.clear();
+          const answer = (text?: string) =>
+            tg(botToken, "answerCallbackQuery", {
+              callback_query_id: cb.id,
+              ...(text ? { text: text.slice(0, 190) } : {}),
+            }).catch(() => null);
+          // الأزرار تشتغل لصاحب الحساب في محادثته الخاصة فقط — مش لأي عضو في جروب.
+          if (typeof cbChat === "number" && cb.from?.id !== cbChat) {
+            await answer("الأزرار دي لصاحب الحساب من المحادثة الخاصة مع البوت.");
+            return Response.json({ ok: true });
+          }
+          let answered = false;
+          // لو التنفيذ طوّل، نوقف دوران الزر فوراً ونكمّل الشغل.
+          const slow = setTimeout(() => {
+            answered = true;
+            void answer("⏳ شغّال عليها…");
+          }, 6000);
           let toast: string | undefined;
           try {
             if (typeof cbChat === "number" && cb.data) {
@@ -150,19 +172,17 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
           } catch (e) {
             console.error("[telegram] callback failed:", e);
             toast = `تعذّر التنفيذ: ${(e instanceof Error ? e.message : "").slice(0, 150)}`;
+            if (answered && typeof cbChat === "number") await telegramReply(botToken, cbChat, `⚠️ ${toast}`).catch(() => null);
           }
-          await tg(botToken, "answerCallbackQuery", {
-            callback_query_id: cb.id,
-            ...(toast ? { text: toast.slice(0, 190) } : {}),
-          }).catch(() => null);
+          clearTimeout(slow);
+          if (!answered) await answer(toast);
           return Response.json({ ok: true });
         }
 
-        const message =
-          update.message ??
-          update.edited_message ??
-          update.channel_post ??
-          update.edited_channel_post;
+        // تعديل رسالة قديمة لا يُعاد تنفيذه كطلب جديد (يمنع نشر/اعتماد مكرر).
+        if (update.edited_message || update.edited_channel_post) return Response.json({ ok: true });
+
+        const message = update.message ?? update.channel_post;
         const chatId = message?.chat?.id;
         if (!message || typeof chatId !== "number") return Response.json({ ok: true });
 

@@ -198,6 +198,16 @@ export async function handleTelegramTeam(
   const ui = await import("./telegram-ui.server");
   const uiCtx = { admin, botToken, chatId, link: link as unknown as import("./telegram-ui.server").LinkRow };
 
+  // ── إلغاء عام: يمسح أي خطوة معلّقة بدل ما يروح النص لموظف ──
+  if (/^\/?(cancel|الغاء|إلغاء|الغي|إلغي)(@\w+)?$/i.test(raw.trim())) {
+    await ui.writePending(admin, uiCtx.link, { wait: null, skill: null } as never);
+    await tg(botToken, "sendMessage", {
+      chat_id: chatId,
+      text: "✖️ اتلغت الخطوة المعلّقة. اكتب طلبك الجديد أو /menu للقائمة.",
+    });
+    return true;
+  }
+
   // ── رد نصي ينتظره البوت (تعديل مخرج / ملاحظة / سبب رفض) ──
   if (parsed.kind !== "command" && raw && !attachments.length) {
     if (await ui.handlePendingText(uiCtx, raw)) return true;
