@@ -209,16 +209,19 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
             await telegramReply(
               botToken,
               chatId,
-              "أرسل طلبك نصاً من فضلك — أتعامل حالياً مع الرسائل النصية.",
+              "🎙️ الرسائل الصوتية والصور والملفات بتشتغل بعد ربط حسابك. اضغط /start لربط حسابك من هنا في ثوانٍ، أو اكتب طلبك نصاً الآن.",
             );
             return Response.json({ ok: true });
           }
           const { handleCommandMessage } = await import("@/lib/command-core.server");
-          const reply = await handleCommandMessage(supabaseAdmin, {
-            channel: "telegram",
-            externalId: String(chatId),
-            text,
-          });
+          const { withTyping } = await import("@/lib/telegram.server");
+          const reply = await withTyping(botToken, chatId, () =>
+            handleCommandMessage(supabaseAdmin, {
+              channel: "telegram",
+              externalId: String(chatId),
+              text,
+            }),
+          );
           await telegramReply(botToken, chatId, reply);
         } catch (e) {
           const detail = e instanceof Error ? e.message : "خطأ غير معروف";

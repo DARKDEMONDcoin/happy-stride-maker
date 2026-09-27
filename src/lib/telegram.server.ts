@@ -301,8 +301,23 @@ export async function telegramPublish(
 
 /** رسالة خاصة لأي دردشة (الردود على أوامر صاحب العمل والإشعارات). */
 export async function telegramReply(botToken: string, chatId: string | number, text: string) {
-  const body = text.length > 4096 ? `${text.slice(0, 4080)}…` : text;
-  await tg(botToken, "sendMessage", { chat_id: chatId, text: body });
+  // يقسّم الردود الطويلة بدل قصّها حتى لا يضيع أي جزء من مخرج الموظف.
+  const { splitForTelegram } = await import("./telegram-format");
+  for (const part of splitForTelegram(text || "…")) {
+    await tg(botToken, "sendMessage", { chat_id: chatId, text: part });
+  }
+}
+
+/** مؤشر «يكتب…» يتجدد كل 4 ثوانٍ طوال عمل طويل، ثم يتوقف تلقائياً. */
+export async function withTyping<T>(botToken: string, chatId: string | number, work: () => Promise<T>): Promise<T> {
+  const ping = () => tg(botToken, "sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => null);
+  void ping();
+  const timer = setInterval(() => void ping(), 4000);
+  try {
+    return await work();
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 /**

@@ -233,6 +233,65 @@ export async function viewAnalytics(ctx: UiCtx) {
   );
 }
 
+// ── مشاريع الفريق: نفس جدول «مهام الفريق» في الموقع (عرض + اعتماد/رفض) ──
+const TEAM_STATUS: Record<string, string> = {
+  running: "⏳ جارٍ التنفيذ",
+  awaiting_approval: "🟡 بانتظار اعتمادك",
+  approved: "✅ معتمد",
+  rejected: "✖️ مرفوض",
+  error: "⚠️ تعثّر",
+};
+
+async function viewTeamProjects(ctx: UiCtx) {
+  const { data } = await (ctx.admin as any)
+    .from("team_tasks")
+    .select("id, goal, status, created_at")
+    .eq("workspace_id", ctx.link.workspace_id)
+    .order("created_at", { ascending: false })
+    .limit(8);
+  const rows = (data ?? []) as { id: string; goal: string; status: string; created_at: string }[];
+  const kb: Button[][] = rows.map((r) => [
+    { text: `${TEAM_STATUS[r.status]?.split(" ")[0] ?? "•"} ${cut(r.goal, 40)}`, callback_data: `ztv:${r.id}` },
+  ]);
+  kb.push(back());
+  await show(
+    ctx,
+    rows.length
+      ? `🤝 <b>مشاريع الفريق</b>\nمهام اشتغل عليها أكثر من موظف مع بعض. اختار واحدة تشوف التسليم النهائي.`
+      : `🤝 <b>مشاريع الفريق</b>\nمفيش مشاريع لسه. اكتب هدفك الكبير لأي موظف (مثال: «جهّزوا حملة إطلاق كاملة لمنتجنا») وهيوزّع الشغل على الفريق.`,
+    kb,
+  );
+}
+
+async function viewTeamProject(ctx: UiCtx, id: string) {
+  const { data: t } = await (ctx.admin as any)
+    .from("team_tasks")
+    .select("id, goal, status, final_output, team_task_steps(position, employee_id, status)")
+    .eq("id", id)
+    .eq("workspace_id", ctx.link.workspace_id)
+    .maybeSingle();
+  if (!t) return void (await show(ctx, "المشروع مش موجود.", [back("zt")]));
+  const steps = ((t.team_task_steps ?? []) as { position: number; employee_id: string; status: string }[])
+    .sort((x, y) => x.position - y.position)
+    .map((s) => `${s.status === "done" ? "✅" : s.status === "running" ? "⏳" : "▫️"} ${esc(s.employee_id)}`)
+    .join(" ← ");
+  const kb: Button[][] = [];
+  if (t.status === "awaiting_approval") {
+    kb.push([{ text: "✅ اعتمد التسليم", callback_data: `zta:${t.id}` }, { text: "✖️ ارفض", callback_data: `ztx:${t.id}` }]);
+  }
+  kb.push(back("zt"));
+  await show(
+    ctx,
+    [
+      `🤝 <b>${esc(cut(t.goal, 200))}</b>`,
+      TEAM_STATUS[t.status] ?? esc(t.status),
+      steps ? `\n<b>خطوات الفريق:</b> ${steps}` : "",
+      t.final_output ? `\n<b>التسليم النهائي:</b>\n${esc(String(t.final_output))}` : "",
+    ].filter(Boolean).join("\n"),
+    kb,
+  );
+}
+
 /** موجّه أزرار الشاشات الإضافية (البادئة z). يعيد null لو الزر مش تبعها. */
 export async function handleExtraCallback(ctx: UiCtx, op: string, a: string, b = ""): Promise<string | undefined | null> {
   const ws = ctx.link.workspace_id;
@@ -326,6 +385,17 @@ export async function handleExtraCallback(ctx: UiCtx, op: string, a: string, b =
     }
     case "zv":
       return void (await viewAnalytics(ctx));
+    case "zt":
+      return void (await viewTeamProjects(ctx));
+    case "ztv":
+      return void (await viewTeamProject(ctx, a));
+    case "zta":
+    case "ztx": {
+      const status = op === "zta" ? "approved" : "rejected";
+      await (ctx.admin as any).from("team_tasks").update({ status }).eq("id", a).eq("workspace_id", ws);
+      await viewTeamProject(ctx, a);
+      return status === "approved" ? "✅ اعتمدت التسليم" : "✖️ رفضته";
+    }
     default:
       return await handleAccountCallback(ctx, op, a);
   }
