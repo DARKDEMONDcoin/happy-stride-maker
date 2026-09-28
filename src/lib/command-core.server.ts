@@ -81,7 +81,7 @@ async function answerAsEmployee(
 }
 
 /** المنصات المربوطة فعلياً في مساحة العمل. */
-async function connectedProviders(admin: Admin, workspaceId: string): Promise<string[]> {
+export async function connectedProviders(admin: Admin, workspaceId: string): Promise<string[]> {
   const [{ data: linked }, { data: direct }, { data: meta }, { data: telegramCredential }] = await Promise.all([
     admin
       .from("pipedream_accounts")
