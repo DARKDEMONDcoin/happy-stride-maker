@@ -486,6 +486,19 @@ export async function viewTask(ctx: UiCtx, id: string, note?: string) {
       { text: "✏️ تعديل بالكتابة", callback_data: `ae:${t.id}` },
     ]);
   }
+  // النشر الفعلي من الشات على كل منصة مربوطة — بنفس مسار نشر الموقع.
+  const socialChannels = new Set(["instagram", "facebook", "linkedin", "x", "twitter", "telegram", "pinterest", "threads", "tiktok", "youtube"]);
+  if (t.output && t.status !== "rejected" && (t.employee_id === "sonny" || socialChannels.has(String(t.channel ?? "").toLowerCase()))) {
+    const { connectedProviders } = await import("./command-core.server");
+    const connected = await connectedProviders(ctx.admin, ctx.link.workspace_id).catch(() => [] as string[]);
+    if (connected.length) {
+      const btns = connected.slice(0, 6).map((p) => ({ text: `📤 ${providerLabel(p)}`, callback_data: `pb:${t.id}:${p}` }));
+      for (let i = 0; i < btns.length; i += 3) kb.push(btns.slice(i, i + 3));
+      if (connected.length > 1) kb.push([{ text: "🚀 انشر على الكل", callback_data: `pb:${t.id}:all` }]);
+    } else {
+      kb.push([{ text: "🔌 اربط منصة للنشر", callback_data: "i" }]);
+    }
+  }
   kb.push(back(t.status === "review" ? "ap" : "t:all"));
   const publishable = new Set(["instagram", "facebook", "linkedin", "x", "twitter", "telegram", "pinterest", "youtube"]);
   if (t.output && publishable.has(String(t.channel ?? "").toLowerCase())) {
@@ -1109,6 +1122,12 @@ export async function handleCallback(ctx: UiCtx, data: string): Promise<string |
       const ok = await decideTask(ctx, a, "done");
       await viewTask(ctx, a, ok ? "✅ <b>اتعتمدت.</b>" : undefined);
       return ok ? "اتعتمدت ✅" : "مش موجودة";
+    }
+    case "pb": {
+      const { publishTaskNow } = await import("./telegram-publish.server");
+      const lines = await publishTaskNow(ctx.admin, ctx.link.workspace_id, a, b ?? "all");
+      await show(ctx, `<b>📤 نتيجة النشر</b>\n${esc(lines)}`, [[{ text: "↩️ رجوع للمنشور", callback_data: `tv:${a}` }], back()]);
+      return "تم";
     }
     case "aall": {
       const { data: rows } = await ctx.admin.from("tasks").select("id").eq("workspace_id", ws).eq("status", "review").limit(50);

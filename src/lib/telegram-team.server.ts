@@ -292,6 +292,25 @@ export async function handleTelegramTeam(
     await admin.from("command_drafts").update({ status: "cancelled" }).eq("id", pending.id);
   }
 
+  // «انشره على فيسبوك» بعد مخرج جاهز: نعرض نفس المخرج بأزرار النشر بدل كتابة منشور جديد.
+  const { isPublishPrevious } = await import("./telegram-publish.server");
+  if (!attachments.length && isPublishPrevious(text)) {
+    const { data: last } = await admin
+      .from("tasks")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("employee_id", member.id)
+      .not("output", "is", null)
+      .gte("created_at", new Date(Date.now() - 6 * 3_600_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (last) {
+      await ui.viewTask(uiCtx, last.id, "📤 <b>ده آخر منشور جهّزته — اختار المنصة وهيتنشر فوراً:</b>");
+      return true;
+    }
+  }
+
   // ── عقل الموظف الكامل (نفس شات الموقع) ──
   const conversationId = await ensureConversation(admin, workspaceId, member.id, ids, false);
   await admin
