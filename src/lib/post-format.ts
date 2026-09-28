@@ -366,3 +366,21 @@ export function bestTimeFor(provider: string, from: Date = new Date()): Date {
   }
   return fallback;
 }
+
+/** يحذف وصف صورة إنجليزياً تسرّب داخل منشور عربي (مثل "A warm, cinematic close-up …"). */
+export function stripLeakedImagePrompt(body: string): string {
+  const arabic = (body.match(/[\u0600-\u06FF]/g) ?? []).length;
+  if (arabic < 20) return body;
+  return body
+    .split(/\n/)
+    .filter((line) => {
+      const latin = (line.match(/[A-Za-z]/g) ?? []).length;
+      const ar = (line.match(/[\u0600-\u06FF]/g) ?? []).length;
+      const words = line.trim().split(/\s+/).length;
+      const promptish = /\b(photo(graph)?|cinematic|close-up|lighting|background|style|render|shot|atmosphere|4k)\b/i.test(line);
+      return !(latin > 25 && ar < latin / 6 && (words >= 8 || promptish) && !/https?:\/\//.test(line));
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

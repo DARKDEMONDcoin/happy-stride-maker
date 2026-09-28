@@ -1,3 +1,4 @@
+import { stripLeakedImagePrompt } from "@/lib/post-format";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -1416,7 +1417,7 @@ export async function runEmployeeTurn(
     }
 
     reply = fillPlaceholders(reply, brandName, ws.website ?? null, brandProducts);
-    reply = sanitizeActionClaims(reply, connected);
+    reply = stripLeakedImagePrompt(sanitizeActionClaims(reply, connected));
     // منع التكرار: أحياناً يعيد النموذج نفس الفقرة مرتين (ملخص + مخرج) — نُبقي أول ظهور فقط.
     reply = dropEchoedSection(dedupeParagraphs(reply));
 
@@ -1522,7 +1523,7 @@ export async function runEmployeeTurn(
     // بعد حَكَم الجودة أيضاً: لا يخرج أي فراغ نائب إلى المستخدم.
     reply = fillPlaceholders(reply, brandName, ws.website ?? null, brandProducts);
     for (const d of deliverables) {
-      d.body = fillPlaceholders(d.body ?? "", brandName, ws.website ?? null, brandProducts);
+      d.body = stripLeakedImagePrompt(fillPlaceholders(d.body ?? "", brandName, ws.website ?? null, brandProducts));
     }
     if (deliverables.length === 1) {
       // حارس أخير بعد المراجعة الآلية: حتى لو أعادت المراجعة مقدمة أو تذييل قياس،
