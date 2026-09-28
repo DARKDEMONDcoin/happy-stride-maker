@@ -138,7 +138,14 @@ async function draftPost(
       .limit(8),
   ]);
 
-  const brand = buildBrandContext(ws ?? {}, brain ?? [], request, 10);
+  const { brandOptedOut, brandUsageRule } = await import("./brand-relevance");
+  const brandOff = brandOptedOut([request], ws?.name);
+  const brand = [
+    brandOff ? "" : buildBrandContext(ws ?? {}, brain ?? [], request, 10),
+    brandUsageRule(ws?.name, brandOff),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const timeZone = timezoneForCountry(ws?.country);
   const liveFacts = needsLiveFacts(request)
