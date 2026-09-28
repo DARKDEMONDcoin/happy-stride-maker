@@ -830,12 +830,14 @@ export async function executeSkill(
     .join(" · ");
   const turnPlan = planTurn(`${skill.title} ${requestSummary}`, LONG_SKILLS.has(skill.id));
 
-  const brandContext = buildBrandContext(
-    workspace,
-    brain ?? [],
-    `${skill.title} ${requestSummary}`,
-    10,
-  );
+  const { brandOptedOut, brandUsageRule } = await import("./brand-relevance");
+  const brandOff = brandOptedOut([requestSummary], workspace.name);
+  const brandContext = [
+    brandOff ? "" : buildBrandContext(workspace, brain ?? [], `${skill.title} ${requestSummary}`, 10),
+    brandUsageRule(workspace.name, brandOff),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const research = await researchFor(
     params.employeeId,
