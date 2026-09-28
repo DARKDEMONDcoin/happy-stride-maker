@@ -122,7 +122,7 @@ export function markdownToTelegramHtml(md: string): string {
 }
 
 /** يقسّم نصاً طويلاً على حدود الفقرات ثم الأسطر (حد تيليجرام 4096). */
-export function splitForTelegram(text: string, max = 3800): string[] {
+export function splitForTelegram(text: string, max = 3700): string[] {
   if (text.length <= max) return [text];
   const parts: string[] = [];
   let buf = "";
@@ -157,7 +157,25 @@ export function splitForTelegram(text: string, max = 3800): string[] {
     }
   }
   push();
-  return parts;
+  return balanceTags(parts);
+}
+
+/** يغلق الوسوم المفتوحة آخر كل جزء ويعيد فتحها أول الجزء التالي (تيليجرام يرفض HTML غير متوازن). */
+function balanceTags(parts: string[]): string[] {
+  let carry: string[] = [];
+  return parts.map((p) => {
+    const text = carry.join("") + p;
+    const stack: string[] = [];
+    for (const m of text.matchAll(/<(\/?)(b|i|u|s|code|pre|a)(\s[^>]*)?>/g)) {
+      if (m[1]) {
+        const idx = stack.map((t) => t.match(/^<(\w+)/)![1]).lastIndexOf(m[2]!);
+        if (idx >= 0) stack.splice(idx, 1);
+      } else stack.push(m[0]);
+    }
+    carry = stack;
+    const close = [...stack].reverse().map((t) => `</${t.match(/^<(\w+)/)![1]}>`).join("");
+    return text + close;
+  });
 }
 
 export function teamCard(activeId?: string | null): string {
