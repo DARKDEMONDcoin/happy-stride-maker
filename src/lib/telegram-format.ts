@@ -122,7 +122,7 @@ export function markdownToTelegramHtml(md: string): string {
 }
 
 /** يقسّم نصاً طويلاً على حدود الفقرات ثم الأسطر (حد تيليجرام 4096). */
-export function splitForTelegram(text: string, max = 3800): string[] {
+export function splitForTelegram(text: string, max = 3700): string[] {
   if (text.length <= max) return [text];
   const parts: string[] = [];
   let buf = "";
