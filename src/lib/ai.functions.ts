@@ -429,12 +429,26 @@ export async function runEmployeeTurn(
     });
 
     const { durableMemoryItems, extractExplicitMemories } = await import("./memory.server");
-    const brandContext = buildBrandContext(
-      workspace,
-      [...(brain ?? []), ...durableMemoryItems(durable ?? [])],
-      data.message,
-      10,
+    const { brandOptedOut, brandUsageRule, CONTINUITY_RULE } = await import("./brand-relevance");
+    const brandOff = brandOptedOut(
+      [data.message, ...(history ?? []).filter((m) => m.role === "user").map((m) => m.body ?? "")],
+      workspace?.name,
     );
+    const brandContext = [
+      brandOff
+        ? ""
+        : buildBrandContext(
+            workspace,
+            [...(brain ?? []), ...durableMemoryItems(durable ?? [])],
+            data.message,
+            10,
+          ),
+      brandUsageRule(workspace?.name, brandOff),
+      CONTINUITY_RULE,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const brandName = brandOff ? "" : (workspace?.name ?? "");
     const extracted = extractExplicitMemories(data.message);
     if (extracted.length) {
       await supabase.from("brand_memories").insert(
@@ -918,7 +932,7 @@ export async function runEmployeeTurn(
       `المنصة الافتراضية لك هي ${persona.channel} ونوع مخرجك الشائع ${persona.kind}.`,
       // قاعدة «صفر فراغات نائبة» معرّفة مرة واحدة في masteryStandard أعلاه؛
       // هنا سطر تطبيقي واحد فقط يربطها باسم العلامة وحقول JSON.
-      `تطبيق قاعدة صفر الفراغات: اسم العلامة «${workspace.name}» يُكتب حرفياً في reply وbody والهاشتاقات؛ وعند غياب رابط اكتب «الرابط في البايو»، وعند غياب مدينة خاطب الجمهور العربي عموماً، وحدّد يوماً وساعة فعليين للنشر في حقل scheduled وحده — لا داخل body.`,
+      `تطبيق قاعدة صفر الفراغات: ${brandOff ? "لا تذكر العلامة إطلاقاً (المالك أوقفها)؛" : `اسم العلامة «${workspace.name}» يُكتب حرفياً فقط حين يكون المخرج عن النشاط أو ترويجياً، وفي المواضيع العامة لا يُذكر؛`} وعند غياب رابط اكتب «الرابط في البايو»، وعند غياب مدينة خاطب الجمهور العربي عموماً، وحدّد يوماً وساعة فعليين للنشر في حقل scheduled وحده — لا داخل body.`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -1401,7 +1415,7 @@ export async function runEmployeeTurn(
       if (postBody.length > 60) reply = postBody;
     }
 
-    reply = fillPlaceholders(reply, workspace.name, ws.website ?? null, brandProducts);
+    reply = fillPlaceholders(reply, brandName, ws.website ?? null, brandProducts);
     reply = sanitizeActionClaims(reply, connected);
     // منع التكرار: أحياناً يعيد النموذج نفس الفقرة مرتين (ملخص + مخرج) — نُبقي أول ظهور فقط.
     reply = dropEchoedSection(dedupeParagraphs(reply));
@@ -1506,9 +1520,9 @@ export async function runEmployeeTurn(
     }
 
     // بعد حَكَم الجودة أيضاً: لا يخرج أي فراغ نائب إلى المستخدم.
-    reply = fillPlaceholders(reply, workspace.name, ws.website ?? null, brandProducts);
+    reply = fillPlaceholders(reply, brandName, ws.website ?? null, brandProducts);
     for (const d of deliverables) {
-      d.body = fillPlaceholders(d.body ?? "", workspace.name, ws.website ?? null, brandProducts);
+      d.body = fillPlaceholders(d.body ?? "", brandName, ws.website ?? null, brandProducts);
     }
     if (deliverables.length === 1) {
       // حارس أخير بعد المراجعة الآلية: حتى لو أعادت المراجعة مقدمة أو تذييل قياس،
